@@ -1,0 +1,5 @@
+{
+  "name": "Financial Viability Tracker",
+  "description": "An internal tool to calculate Gross Margin and Operating Profit based on Retail Sales and Operating Costs.",
+  "requestFramePermissions": []
+}
