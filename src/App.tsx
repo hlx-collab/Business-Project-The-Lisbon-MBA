@@ -23,7 +23,9 @@ export default function App() {
 
   const [fixedCostsStreams, setFixedCostsStreams] = useState<FinancialStream[]>([
     { id: '1', name: 'Rent', amounts: ['', '', '', '', ''] },
-    { id: '2', name: 'Salaries', amounts: ['', '', '', '', ''] }
+    { id: '2', name: 'Salaries', amounts: ['', '', '', '', ''] },
+    { id: '3', name: 'Advertisement', amounts: ['', '', '', '', ''], isPermanent: true },
+    { id: '4', name: 'IT R&D and Support', amounts: ['', '', '', '', ''], isPermanent: true }
   ]);
 
   const years = [0, 1, 2, 3, 4];
@@ -79,46 +81,24 @@ export default function App() {
     setStreams(streams.filter(stream => stream.id !== id));
   };
 
-  const chartData = [...years.map(y => {
-    const data: any = { name: `Year ${y + 1}` };
-    revenueStreams.forEach(s => data[`rev-${s.id}`] = typeof s.amounts[y] === 'number' ? s.amounts[y] : 0);
-    variableCostsStreams.forEach(s => data[`var-${s.id}`] = typeof s.amounts[y] === 'number' ? s.amounts[y] : 0);
-    fixedCostsStreams.forEach(s => data[`fix-${s.id}`] = typeof s.amounts[y] === 'number' ? s.amounts[y] : 0);
-    data['gross-margin'] = grossMarginByYear[y];
-    data['op-profit'] = opProfitByYear[y];
-    return data;
-  }), {
+  const chartData = [...years.map(y => ({
+    name: `Year ${y + 1}`,
+    'Total Revenue': totalRevenueByYear[y],
+    'Total Var. Costs': totalVarCostsByYear[y],
+    'Gross Margin': grossMarginByYear[y],
+    'Total Fixed Costs': totalFixedCostsByYear[y],
+    'Op. Profit': opProfitByYear[y]
+  })), {
     name: 'Total',
-    ...revenueStreams.reduce((acc, s) => ({...acc, [`rev-${s.id}`]: getStreamTotal(s)}), {}),
-    ...variableCostsStreams.reduce((acc, s) => ({...acc, [`var-${s.id}`]: getStreamTotal(s)}), {}),
-    ...fixedCostsStreams.reduce((acc, s) => ({...acc, [`fix-${s.id}`]: getStreamTotal(s)}), {}),
-    'gross-margin': grossMargin,
-    'op-profit': operatingProfit
+    'Total Revenue': totalRevenue,
+    'Total Var. Costs': totalVariableCosts,
+    'Gross Margin': grossMargin,
+    'Total Fixed Costs': fixedCosts,
+    'Op. Profit': operatingProfit
   }];
-
-  const revenueColors = ['#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe'];
-  const varCostColors = ['#d97706', '#f59e0b', '#fbbf24', '#fcd34d', '#fde68a'];
-  const fixedCostColors = ['#ea580c', '#f97316', '#fb923c', '#fdba74', '#fed7aa'];
 
   const formatTooltip = (value: any, name: any) => {
     const numValue = typeof value === 'number' ? value : Number(value);
-    if (name === 'gross-margin') return [formatCurrency(numValue), 'Gross Margin'];
-    if (name === 'op-profit') return [formatCurrency(numValue), 'Operating Profit'];
-    
-    if (typeof name === 'string') {
-      if (name.startsWith('rev-')) {
-        const stream = revenueStreams.find(s => s.id === name.replace('rev-', ''));
-        return [formatCurrency(numValue), stream ? stream.name : name];
-      }
-      if (name.startsWith('var-')) {
-        const stream = variableCostsStreams.find(s => s.id === name.replace('var-', ''));
-        return [formatCurrency(numValue), stream ? stream.name : name];
-      }
-      if (name.startsWith('fix-')) {
-        const stream = fixedCostsStreams.find(s => s.id === name.replace('fix-', ''));
-        return [formatCurrency(numValue), stream ? stream.name : name];
-      }
-    }
     return [formatCurrency(numValue), name];
   };
 
@@ -147,7 +127,8 @@ export default function App() {
     streams: FinancialStream[], 
     setStreams: React.Dispatch<React.SetStateAction<FinancialStream[]>>, 
     prefix: string, 
-    total: number
+    total: number,
+    totalsByYear: number[]
   ) => (
     <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6">
       <div className="flex items-center justify-between">
@@ -222,9 +203,18 @@ export default function App() {
           </div>
         ))}
       </div>
-      <div className="pt-4 border-t border-slate-100 flex justify-between items-center">
-        <span className="text-sm font-medium text-slate-500">Total {title}</span>
-        <span className="text-lg font-semibold text-slate-900">{formatCurrency(total)}</span>
+      <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center space-y-3 sm:space-y-0 sm:space-x-3">
+        <div className="flex-1 text-sm font-medium text-slate-500">Total {title}</div>
+        <div className="grid grid-cols-6 gap-2 w-full sm:max-w-[400px]">
+          {years.map(y => (
+            <div key={y} className="text-center text-xs font-semibold text-slate-700 truncate">
+              {formatCurrency(totalsByYear[y])}
+            </div>
+          ))}
+          <div className="flex items-center justify-end text-sm font-bold text-slate-900 truncate">
+            {formatCurrency(total)}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -246,9 +236,9 @@ export default function App() {
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
           {/* Inputs Section */}
           <div className="xl:col-span-7 space-y-6">
-            {renderStreamSection('Revenue Streams', revenueStreams, setRevenueStreams, 'Revenue', totalRevenue)}
-            {renderStreamSection('Variable Costs', variableCostsStreams, setVariableCostsStreams, 'Cost', totalVariableCosts)}
-            {renderStreamSection('Fixed Operating Costs', fixedCostsStreams, setFixedCostsStreams, 'Fixed Cost', fixedCosts)}
+            {renderStreamSection('Revenue Streams', revenueStreams, setRevenueStreams, 'Revenue', totalRevenue, totalRevenueByYear)}
+            {renderStreamSection('Variable Costs', variableCostsStreams, setVariableCostsStreams, 'Cost', totalVariableCosts, totalVarCostsByYear)}
+            {renderStreamSection('Fixed Operating Costs', fixedCostsStreams, setFixedCostsStreams, 'Fixed Cost', fixedCosts, totalFixedCostsByYear)}
           </div>
 
           {/* Outputs & Visualization Section */}
@@ -270,23 +260,41 @@ export default function App() {
                 <div className="mt-4 w-full bg-slate-100 rounded-full h-2">
                   <div className="bg-emerald-500 h-2 rounded-full" style={{ width: `${Math.min(Math.max(calculatedMarginPercent, 0), 100)}%` }}></div>
                 </div>
+                <div className="mt-6 grid grid-cols-5 gap-2 pt-4 border-t border-slate-100">
+                  {years.map(y => (
+                    <div key={y} className="text-center">
+                      <div className="text-[10px] text-slate-400 uppercase font-semibold">Y{y+1}</div>
+                      <div className="text-xs font-medium text-slate-700 mt-1">{formatCurrency(grossMarginByYear[y])}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
 
               {/* Operating Profit Card */}
-              <div className={`p-6 rounded-2xl shadow-sm border ${operatingProfit >= 0 ? 'bg-indigo-50 border-indigo-100' : 'bg-red-50 border-red-100'}`}>
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className={`text-sm font-medium ${operatingProfit >= 0 ? 'text-indigo-600/80' : 'text-red-600/80'}`}>
-                      5-Year Operating Profit
-                    </p>
-                    <p className={`mt-2 text-3xl font-bold tracking-tight ${operatingProfit >= 0 ? 'text-indigo-900' : 'text-red-900'}`}>
-                      {formatCurrency(operatingProfit)}
-                    </p>
+              <div className={`p-6 rounded-2xl shadow-sm border flex flex-col justify-between ${operatingProfit >= 0 ? 'bg-indigo-50 border-indigo-100' : 'bg-red-50 border-red-100'}`}>
+                <div>
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className={`text-sm font-medium ${operatingProfit >= 0 ? 'text-indigo-600/80' : 'text-red-600/80'}`}>
+                        5-Year Operating Profit
+                      </p>
+                      <p className={`mt-2 text-3xl font-bold tracking-tight ${operatingProfit >= 0 ? 'text-indigo-900' : 'text-red-900'}`}>
+                        {formatCurrency(operatingProfit)}
+                      </p>
+                    </div>
                   </div>
+                  <p className={`mt-4 text-sm ${operatingProfit >= 0 ? 'text-indigo-600/80' : 'text-red-600/80'}`}>
+                    {operatingProfit >= 0 ? 'Project is financially viable.' : 'Project is operating at a loss.'}
+                  </p>
                 </div>
-                <p className={`mt-4 text-sm ${operatingProfit >= 0 ? 'text-indigo-600/80' : 'text-red-600/80'}`}>
-                  {operatingProfit >= 0 ? 'Project is financially viable.' : 'Project is operating at a loss.'}
-                </p>
+                <div className={`mt-6 grid grid-cols-5 gap-2 pt-4 border-t ${operatingProfit >= 0 ? 'border-indigo-100/50' : 'border-red-100/50'}`}>
+                  {years.map(y => (
+                    <div key={y} className="text-center">
+                      <div className={`text-[10px] uppercase font-semibold ${operatingProfit >= 0 ? 'text-indigo-400' : 'text-red-400'}`}>Y{y+1}</div>
+                      <div className={`text-xs font-medium mt-1 ${operatingProfit >= 0 ? 'text-indigo-700' : 'text-red-700'}`}>{formatCurrency(opProfitByYear[y])}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -318,26 +326,20 @@ export default function App() {
                       cursor={{ fill: '#f1f5f9' }}
                       contentStyle={{ borderRadius: '0.75rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                     />
-                    {revenueStreams.map((s, i) => (
-                      <Bar key={`rev-${s.id}`} dataKey={`rev-${s.id}`} stackId="revenue" fill={revenueColors[i % revenueColors.length]}>
-                        <LabelList dataKey={`rev-${s.id}`} content={(props: any) => renderCustomBarLabel(props, s.name)} />
-                      </Bar>
-                    ))}
-                    {variableCostsStreams.map((s, i) => (
-                      <Bar key={`var-${s.id}`} dataKey={`var-${s.id}`} stackId="varCosts" fill={varCostColors[i % varCostColors.length]}>
-                        <LabelList dataKey={`var-${s.id}`} content={(props: any) => renderCustomBarLabel(props, s.name)} />
-                      </Bar>
-                    ))}
-                    <Bar dataKey="gross-margin" stackId="grossMargin" fill="#8b5cf6">
-                      <LabelList dataKey="gross-margin" content={(props: any) => renderCustomBarLabel(props, 'Gross Margin')} />
+                    <Bar dataKey="Total Revenue" fill="#3b82f6">
+                      <LabelList dataKey="Total Revenue" content={(props: any) => renderCustomBarLabel(props, 'Revenue')} />
                     </Bar>
-                    {fixedCostsStreams.map((s, i) => (
-                      <Bar key={`fix-${s.id}`} dataKey={`fix-${s.id}`} stackId="fixedCosts" fill={fixedCostColors[i % fixedCostColors.length]}>
-                        <LabelList dataKey={`fix-${s.id}`} content={(props: any) => renderCustomBarLabel(props, s.name)} />
-                      </Bar>
-                    ))}
-                    <Bar dataKey="op-profit" stackId="opProfit" fill={operatingProfit >= 0 ? '#10b981' : '#ef4444'}>
-                      <LabelList dataKey="op-profit" content={(props: any) => renderCustomBarLabel(props, 'Op. Profit')} />
+                    <Bar dataKey="Total Var. Costs" fill="#f59e0b">
+                      <LabelList dataKey="Total Var. Costs" content={(props: any) => renderCustomBarLabel(props, 'Var. Costs')} />
+                    </Bar>
+                    <Bar dataKey="Gross Margin" fill="#8b5cf6">
+                      <LabelList dataKey="Gross Margin" content={(props: any) => renderCustomBarLabel(props, 'Margin')} />
+                    </Bar>
+                    <Bar dataKey="Total Fixed Costs" fill="#f97316">
+                      <LabelList dataKey="Total Fixed Costs" content={(props: any) => renderCustomBarLabel(props, 'Fixed Costs')} />
+                    </Bar>
+                    <Bar dataKey="Op. Profit" fill={operatingProfit >= 0 ? '#10b981' : '#ef4444'}>
+                      <LabelList dataKey="Op. Profit" content={(props: any) => renderCustomBarLabel(props, 'Op. Profit')} />
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
