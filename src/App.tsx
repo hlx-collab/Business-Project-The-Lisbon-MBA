@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Calculator, DollarSign, TrendingUp, Activity, Plus, Trash2, Percent } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LabelList } from 'recharts';
 
 interface FinancialStream {
   id: string;
@@ -141,6 +141,30 @@ export default function App() {
       }
     }
     return [formatCurrency(numValue), name];
+  };
+
+  const renderCustomBarLabel = (props: any, name: string) => {
+    const { x, y, width, height, value } = props;
+    // Don't render label if the bar segment is too small
+    if (!value || value <= 0 || height < 24) return null;
+    
+    // Truncate long names to fit in the bar
+    const displayName = name.length > 12 ? name.substring(0, 10) + '...' : name;
+    
+    return (
+      <text 
+        x={x + width / 2} 
+        y={y + height / 2} 
+        fill="#ffffff" 
+        textAnchor="middle" 
+        dominantBaseline="middle" 
+        fontSize={11} 
+        fontWeight={600}
+        style={{ pointerEvents: 'none', textShadow: '0px 1px 2px rgba(0,0,0,0.2)' }}
+      >
+        {displayName}
+      </text>
+    );
   };
 
   return (
@@ -421,16 +445,26 @@ export default function App() {
                       contentStyle={{ borderRadius: '0.75rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                     />
                     {revenueStreams.map((s, i) => (
-                      <Bar key={`rev-${s.id}`} dataKey={`rev-${s.id}`} stackId="a" fill={revenueColors[i % revenueColors.length]} />
+                      <Bar key={`rev-${s.id}`} dataKey={`rev-${s.id}`} stackId="a" fill={revenueColors[i % revenueColors.length]}>
+                        <LabelList dataKey={`rev-${s.id}`} content={(props: any) => renderCustomBarLabel(props, s.name)} />
+                      </Bar>
                     ))}
                     {variableCostsStreams.map((s, i) => (
-                      <Bar key={`var-${s.id}`} dataKey={`var-${s.id}`} stackId="a" fill={varCostColors[i % varCostColors.length]} />
+                      <Bar key={`var-${s.id}`} dataKey={`var-${s.id}`} stackId="a" fill={varCostColors[i % varCostColors.length]}>
+                        <LabelList dataKey={`var-${s.id}`} content={(props: any) => renderCustomBarLabel(props, s.name)} />
+                      </Bar>
                     ))}
-                    <Bar dataKey="gross-margin" stackId="a" fill="#8b5cf6" />
+                    <Bar dataKey="gross-margin" stackId="a" fill="#8b5cf6">
+                      <LabelList dataKey="gross-margin" content={(props: any) => renderCustomBarLabel(props, 'Gross Margin')} />
+                    </Bar>
                     {fixedCostsStreams.map((s, i) => (
-                      <Bar key={`fix-${s.id}`} dataKey={`fix-${s.id}`} stackId="a" fill={fixedCostColors[i % fixedCostColors.length]} />
+                      <Bar key={`fix-${s.id}`} dataKey={`fix-${s.id}`} stackId="a" fill={fixedCostColors[i % fixedCostColors.length]}>
+                        <LabelList dataKey={`fix-${s.id}`} content={(props: any) => renderCustomBarLabel(props, s.name)} />
+                      </Bar>
                     ))}
-                    <Bar dataKey="op-profit" stackId="a" fill={operatingProfit >= 0 ? '#10b981' : '#ef4444'} />
+                    <Bar dataKey="op-profit" stackId="a" fill={operatingProfit >= 0 ? '#10b981' : '#ef4444'}>
+                      <LabelList dataKey="op-profit" content={(props: any) => renderCustomBarLabel(props, 'Op. Profit')} />
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
