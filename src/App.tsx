@@ -22,13 +22,20 @@ export default function App() {
       { id: '4', name: '% of bookings commission', amounts: ['', '', '', '', ''], isPermanent: true },
       { id: '5', name: 'Monthly Subscription fee', amounts: ['', '', '', '', ''], isPermanent: true },
       { id: '6', name: '# of yearly bookings per pet owners', amounts: ['', '', '', '', ''], isPermanent: true },
-      { id: '7', name: 'Unit Customer acquisition costs', amounts: ['', '', '', '', ''], isPermanent: true }
+      { id: 'cac-providers', name: 'Unit CAC - Providers', amounts: ['', '', '', '', ''], isPermanent: true },
+      { id: 'cac-owners', name: 'Unit CAC - Owners', amounts: ['', '', '', '', ''], isPermanent: true },
+      { id: 'cs-providers', name: 'Unit Customer Support cost - Providers', amounts: ['', '', '', '', ''], isPermanent: true },
+      { id: 'cs-owners', name: 'Unit Customer Support cost - Owners', amounts: ['', '', '', '', ''], isPermanent: true }
     ];
     const saved = localStorage.getItem('platformMetricsStreams');
     if (saved) {
       const parsed = JSON.parse(saved);
-      const missing = defaultStreams.filter(ds => !parsed.find((p: any) => p.name === ds.name));
-      return [...parsed, ...missing];
+      const merged = parsed.map((p: any) => {
+        const defaultStream = defaultStreams.find(ds => ds.name === p.name);
+        return defaultStream ? { ...p, isPermanent: defaultStream.isPermanent } : p;
+      });
+      const missing = defaultStreams.filter(ds => !merged.find((p: any) => p.name === ds.name));
+      return [...merged, ...missing];
     }
     return defaultStreams;
   });
@@ -66,37 +73,61 @@ export default function App() {
   }, [chargeBookingFees]);
 
   const [revenueStreams, setRevenueStreams] = useState<FinancialStream[]>(() => {
-    const saved = localStorage.getItem('revenueStreams');
-    return saved ? JSON.parse(saved) : [
+    const defaultStreams = [
       { id: '1', name: 'Monthly Subscriptions', amounts: ['', '', '', '', ''], isPermanent: true },
       { id: '2', name: 'Booking Fees', amounts: ['', '', '', '', ''], isPermanent: true },
       { id: '3', name: 'Others', amounts: ['', '', '', '', ''], isPermanent: true }
     ];
+    const saved = localStorage.getItem('revenueStreams');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      const merged = parsed.map((p: any) => {
+        const defaultStream = defaultStreams.find(ds => ds.name === p.name);
+        return defaultStream ? { ...p, isPermanent: defaultStream.isPermanent } : p;
+      });
+      const missing = defaultStreams.filter(ds => !merged.find((p: any) => p.name === ds.name));
+      return [...merged, ...missing];
+    }
+    return defaultStreams;
   });
   
   const [variableCostsStreams, setVariableCostsStreams] = useState<FinancialStream[]>(() => {
     const defaultStreams = [
       { id: '1', name: 'Payment Processing', amounts: ['', '', '', '', ''], isPermanent: true },
-      { id: '2', name: 'Customer Support', amounts: ['', '', '', '', ''] },
+      { id: '2', name: 'Customer Support', amounts: ['', '', '', '', ''], isPermanent: true },
       { id: '3', name: 'Customer acquisition costs', amounts: ['', '', '', '', ''], isPermanent: true }
     ];
     const saved = localStorage.getItem('variableCostsStreams');
     if (saved) {
       const parsed = JSON.parse(saved);
-      const missing = defaultStreams.filter(ds => !parsed.find((p: any) => p.name === ds.name));
-      return [...parsed, ...missing];
+      const merged = parsed.map((p: any) => {
+        const defaultStream = defaultStreams.find(ds => ds.name === p.name);
+        return defaultStream ? { ...p, isPermanent: defaultStream.isPermanent } : p;
+      });
+      const missing = defaultStreams.filter(ds => !merged.find((p: any) => p.name === ds.name));
+      return [...merged, ...missing];
     }
     return defaultStreams;
   });
 
   const [fixedCostsStreams, setFixedCostsStreams] = useState<FinancialStream[]>(() => {
-    const saved = localStorage.getItem('fixedCostsStreams');
-    return saved ? JSON.parse(saved) : [
+    const defaultStreams = [
       { id: '1', name: 'Rent', amounts: ['', '', '', '', ''] },
       { id: '2', name: 'Salaries', amounts: ['', '', '', '', ''] },
       { id: '3', name: 'Advertisement', amounts: ['', '', '', '', ''], isPermanent: true },
       { id: '4', name: 'IT R&D and Support', amounts: ['', '', '', '', ''], isPermanent: true }
     ];
+    const saved = localStorage.getItem('fixedCostsStreams');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      const merged = parsed.map((p: any) => {
+        const defaultStream = defaultStreams.find(ds => ds.name === p.name);
+        return defaultStream ? { ...p, isPermanent: defaultStream.isPermanent } : p;
+      });
+      const missing = defaultStreams.filter(ds => !merged.find((p: any) => p.name === ds.name));
+      return [...merged, ...missing];
+    }
+    return defaultStreams;
   });
 
   useEffect(() => {
@@ -182,7 +213,8 @@ export default function App() {
     if (stream.id === '3' || stream.name === 'Customer acquisition costs') {
       const providersStream = platformMetricsStreams.find(s => s.id === '1' || s.name === 'Number of providers in the platform');
       const ownersStream = platformMetricsStreams.find(s => s.id === '2' || s.name === 'Number of owners in the platform');
-      const unitCacStream = platformMetricsStreams.find(s => s.id === '7' || s.name === 'Unit Customer acquisition costs');
+      const unitCacProvidersStream = platformMetricsStreams.find(s => s.id === 'cac-providers' || s.name === 'Unit CAC - Providers');
+      const unitCacOwnersStream = platformMetricsStreams.find(s => s.id === 'cac-owners' || s.name === 'Unit CAC - Owners');
       
       const amounts = years.map(y => {
         const currentProviders = Number(providersStream?.amounts[y]) || 0;
@@ -193,9 +225,26 @@ export default function App() {
         const newProviders = Math.max(0, currentProviders - prevProviders);
         const newOwners = Math.max(0, currentOwners - prevOwners);
         
-        const unitCac = Number(unitCacStream?.amounts[y]) || 0;
+        const unitCacProviders = Number(unitCacProvidersStream?.amounts[y]) || 0;
+        const unitCacOwners = Number(unitCacOwnersStream?.amounts[y]) || 0;
         
-        return (newProviders + newOwners) * unitCac;
+        return (newProviders * unitCacProviders) + (newOwners * unitCacOwners);
+      });
+      return { ...stream, amounts, isCalculated: true };
+    }
+    if (stream.id === '2' || stream.name === 'Customer Support') {
+      const providersStream = platformMetricsStreams.find(s => s.id === '1' || s.name === 'Number of providers in the platform');
+      const ownersStream = platformMetricsStreams.find(s => s.id === '2' || s.name === 'Number of owners in the platform');
+      const unitSupportProvidersStream = platformMetricsStreams.find(s => s.id === 'cs-providers' || s.name === 'Unit Customer Support cost - Providers');
+      const unitSupportOwnersStream = platformMetricsStreams.find(s => s.id === 'cs-owners' || s.name === 'Unit Customer Support cost - Owners');
+      
+      const amounts = years.map(y => {
+        const providers = Number(providersStream?.amounts[y]) || 0;
+        const owners = Number(ownersStream?.amounts[y]) || 0;
+        const unitCostProviders = Number(unitSupportProvidersStream?.amounts[y]) || 0;
+        const unitCostOwners = Number(unitSupportOwnersStream?.amounts[y]) || 0;
+        
+        return (providers * unitCostProviders) + (owners * unitCostOwners);
       });
       return { ...stream, amounts, isCalculated: true };
     }
