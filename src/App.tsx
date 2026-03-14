@@ -21,7 +21,8 @@ export default function App() {
       { id: '3', name: 'Avg price per booking', amounts: ['', '', '', '', ''], isPermanent: true },
       { id: '4', name: '% of bookings commission', amounts: ['', '', '', '', ''], isPermanent: true },
       { id: '5', name: 'Monthly Subscription fee', amounts: ['', '', '', '', ''], isPermanent: true },
-      { id: '6', name: '# of yearly bookings per pet owners', amounts: ['', '', '', '', ''], isPermanent: true }
+      { id: '6', name: '# of yearly bookings per pet owners', amounts: ['', '', '', '', ''], isPermanent: true },
+      { id: '7', name: 'Unit Customer acquisition costs', amounts: ['', '', '', '', ''], isPermanent: true }
     ];
     const saved = localStorage.getItem('platformMetricsStreams');
     if (saved) {
@@ -74,11 +75,18 @@ export default function App() {
   });
   
   const [variableCostsStreams, setVariableCostsStreams] = useState<FinancialStream[]>(() => {
-    const saved = localStorage.getItem('variableCostsStreams');
-    return saved ? JSON.parse(saved) : [
-      { id: '1', name: 'Payment Processing', amounts: ['', '', '', '', ''] },
-      { id: '2', name: 'Customer Support', amounts: ['', '', '', '', ''] }
+    const defaultStreams = [
+      { id: '1', name: 'Payment Processing', amounts: ['', '', '', '', ''], isPermanent: true },
+      { id: '2', name: 'Customer Support', amounts: ['', '', '', '', ''] },
+      { id: '3', name: 'Customer acquisition costs', amounts: ['', '', '', '', ''], isPermanent: true }
     ];
+    const saved = localStorage.getItem('variableCostsStreams');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      const missing = defaultStreams.filter(ds => !parsed.find((p: any) => p.name === ds.name));
+      return [...parsed, ...missing];
+    }
+    return defaultStreams;
   });
 
   const [fixedCostsStreams, setFixedCostsStreams] = useState<FinancialStream[]>(() => {
@@ -168,6 +176,26 @@ export default function App() {
 
         const cost = (totalVolume * 0.029) + (totalTransactions * 0.30);
         return cost;
+      });
+      return { ...stream, amounts, isCalculated: true };
+    }
+    if (stream.id === '3' || stream.name === 'Customer acquisition costs') {
+      const providersStream = platformMetricsStreams.find(s => s.id === '1' || s.name === 'Number of providers in the platform');
+      const ownersStream = platformMetricsStreams.find(s => s.id === '2' || s.name === 'Number of owners in the platform');
+      const unitCacStream = platformMetricsStreams.find(s => s.id === '7' || s.name === 'Unit Customer acquisition costs');
+      
+      const amounts = years.map(y => {
+        const currentProviders = Number(providersStream?.amounts[y]) || 0;
+        const currentOwners = Number(ownersStream?.amounts[y]) || 0;
+        const prevProviders = y > 0 ? (Number(providersStream?.amounts[y - 1]) || 0) : 0;
+        const prevOwners = y > 0 ? (Number(ownersStream?.amounts[y - 1]) || 0) : 0;
+        
+        const newProviders = Math.max(0, currentProviders - prevProviders);
+        const newOwners = Math.max(0, currentOwners - prevOwners);
+        
+        const unitCac = Number(unitCacStream?.amounts[y]) || 0;
+        
+        return (newProviders + newOwners) * unitCac;
       });
       return { ...stream, amounts, isCalculated: true };
     }
