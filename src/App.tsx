@@ -8,6 +8,7 @@ interface FinancialStream {
   name: string;
   amounts: (number | '')[];
   isPermanent?: boolean;
+  isCalculated?: boolean;
 }
 
 export default function App() {
@@ -104,9 +105,26 @@ export default function App() {
 
   const years = [0, 1, 2, 3, 4];
 
+  const derivedRevenueStreams = revenueStreams.map(stream => {
+    if (stream.id === '1' || stream.name === 'Monthly Subscriptions') {
+      const providersStream = platformMetricsStreams.find(s => s.id === '1' || s.name === 'Number of providers in the platform');
+      const subFeeStream = platformMetricsStreams.find(s => s.id === '5' || s.name === 'Monthly Subscription fee');
+      
+      const amounts = years.map(y => {
+        const providers = Number(providersStream?.amounts[y]) || 0;
+        const subFee = Number(subFeeStream?.amounts[y]) || 0;
+        const charge = chargeSubscription[y] ? 1 : 0;
+        const total = providers * subFee * charge * 12; // Multiply by 12 for yearly revenue
+        return total;
+      });
+      return { ...stream, amounts, isCalculated: true };
+    }
+    return stream;
+  });
+
   const getStreamTotal = (stream: FinancialStream) => stream.amounts.reduce((sum, val) => (sum as number) + (typeof val === 'number' ? val : 0), 0) as number;
 
-  const totalRevenueByYear = years.map(y => revenueStreams.reduce((sum, stream) => sum + (typeof stream.amounts[y] === 'number' ? stream.amounts[y] as number : 0), 0));
+  const totalRevenueByYear = years.map(y => derivedRevenueStreams.reduce((sum, stream) => sum + (typeof stream.amounts[y] === 'number' ? stream.amounts[y] as number : 0), 0));
   const totalVarCostsByYear = years.map(y => variableCostsStreams.reduce((sum, stream) => sum + (typeof stream.amounts[y] === 'number' ? stream.amounts[y] as number : 0), 0));
   const totalFixedCostsByYear = years.map(y => fixedCostsStreams.reduce((sum, stream) => sum + (typeof stream.amounts[y] === 'number' ? stream.amounts[y] as number : 0), 0));
   const totalPlatformMetricsByYear = years.map(y => platformMetricsStreams.reduce((sum, stream) => sum + (typeof stream.amounts[y] === 'number' ? stream.amounts[y] as number : 0), 0));
@@ -194,7 +212,7 @@ export default function App() {
     rows.push(['Category', 'Stream Name', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']);
     
     // Revenue Streams
-    revenueStreams.forEach(stream => {
+    derivedRevenueStreams.forEach(stream => {
       rows.push(['Revenue', stream.name, ...stream.amounts.map(a => String(a || 0)), String(getStreamTotal(stream))]);
     });
     rows.push(['Revenue Total', '', ...totalRevenueByYear.map(String), String(totalRevenue)]);
@@ -248,7 +266,7 @@ export default function App() {
     rows.push(['Category', 'Stream Name', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']);
     
     // Revenue Streams
-    revenueStreams.forEach(stream => {
+    derivedRevenueStreams.forEach(stream => {
       rows.push(['Revenue', stream.name, ...stream.amounts.map(a => Number(a) || 0), getStreamTotal(stream)]);
     });
     rows.push(['Revenue Total', '', ...totalRevenueByYear, totalRevenue]);
@@ -386,8 +404,9 @@ export default function App() {
                     type="number"
                     value={stream.amounts[y]}
                     onChange={(e) => updateStreamAmount(streams, setStreams, stream.id, y, e.target.value ? Number(e.target.value) : '')}
-                    className="block w-full px-1 py-2 border border-slate-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-xs text-center transition-colors"
+                    className={`block w-full px-1 py-2 border border-slate-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-xs text-center transition-colors ${stream.isCalculated ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : ''}`}
                     placeholder="0"
+                    disabled={stream.isCalculated}
                   />
                 </div>
               ))}
@@ -473,7 +492,7 @@ export default function App() {
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
             {/* Inputs Section */}
             <div className="xl:col-span-7 space-y-6">
-              {renderStreamSection('Revenue Streams', revenueStreams, setRevenueStreams, 'Revenue', totalRevenue, totalRevenueByYear)}
+              {renderStreamSection('Revenue Streams', derivedRevenueStreams, setRevenueStreams, 'Revenue', totalRevenue, totalRevenueByYear)}
               {renderStreamSection('Variable Costs', variableCostsStreams, setVariableCostsStreams, 'Cost', totalVariableCosts, totalVarCostsByYear)}
               {renderStreamSection('Fixed Operating Costs', fixedCostsStreams, setFixedCostsStreams, 'Fixed Cost', fixedCosts, totalFixedCostsByYear)}
             </div>
