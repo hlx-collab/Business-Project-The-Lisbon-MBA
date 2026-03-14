@@ -12,7 +12,7 @@ interface FinancialStream {
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'financials' | 'platform'>('financials');
+  const [activeTab, setActiveTab] = useState<'financials' | 'platform' | 'gross-margin'>('financials');
 
   const [platformMetricsStreams, setPlatformMetricsStreams] = useState<FinancialStream[]>(() => {
     const defaultStreams = [
@@ -259,6 +259,7 @@ export default function App() {
   const totalPlatformMetricsByYear = years.map(y => platformMetricsStreams.reduce((sum, stream) => sum + (typeof stream.amounts[y] === 'number' ? stream.amounts[y] as number : 0), 0));
 
   const grossMarginByYear = years.map(y => totalRevenueByYear[y] - totalVarCostsByYear[y]);
+  const grossMarginPercentByYear = years.map(y => totalRevenueByYear[y] > 0 ? (grossMarginByYear[y] / totalRevenueByYear[y]) * 100 : 0);
   const opProfitByYear = years.map(y => grossMarginByYear[y] - totalFixedCostsByYear[y]);
 
   const totalRevenue = totalRevenueByYear.reduce((a, b) => a + b, 0);
@@ -289,7 +290,7 @@ export default function App() {
     setStreams(streams.map(stream => stream.id === id ? { ...stream, name } : stream));
   };
 
-  const updateStreamAmount = (streams: FinancialStream[], setStreams: React.Dispatch<React.SetStateAction<FinancialStream[]>>, id: string, yearIndex: number, value: string | number) => {
+  const updateStreamAmount = (streams: FinancialStream[], setStreams: React.Dispatch<React.SetStateAction<FinancialStream[]>>, id: string, yearIndex: number, value: number | '') => {
     setStreams(streams.map(stream => {
       if (stream.id === id) {
         const newAmounts = [...stream.amounts];
@@ -615,6 +616,16 @@ export default function App() {
           >
             Platform Metrics
           </button>
+          <button
+            onClick={() => setActiveTab('gross-margin')}
+            className={`pb-4 px-2 text-sm font-medium transition-colors border-b-2 ${
+              activeTab === 'gross-margin'
+                ? 'border-indigo-600 text-indigo-600'
+                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+            }`}
+          >
+            Gross Margin
+          </button>
         </div>
 
         {activeTab === 'financials' && (
@@ -808,6 +819,86 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'gross-margin' && (
+          <div className="space-y-8">
+            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+              <h2 className="text-xl font-semibold mb-6 flex items-center space-x-2">
+                <Percent className="w-6 h-6 text-indigo-600" />
+                <span>5-Year Gross Margin Analysis</span>
+              </h2>
+              
+              <div className="overflow-x-auto -mx-8 px-8">
+                <table className="w-full min-w-[800px]">
+                  <thead>
+                    <tr className="border-b border-slate-100">
+                      <th className="text-left py-4 px-4 text-sm font-semibold text-slate-600">Metric</th>
+                      {years.map(y => (
+                        <th key={y} className="text-right py-4 px-4 text-sm font-semibold text-slate-600">Year {y + 1}</th>
+                      ))}
+                      <th className="text-right py-4 px-4 text-sm font-semibold text-slate-900 bg-slate-50/50">Total / Avg</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="border-b border-slate-50 hover:bg-slate-50/30 transition-colors">
+                      <td className="py-4 px-4 text-sm font-medium text-slate-700">Gross Margin (€)</td>
+                      {years.map(y => (
+                        <td key={y} className="text-right py-4 px-4 text-sm text-slate-600 font-mono">
+                          {formatCurrency(grossMarginByYear[y])}
+                        </td>
+                      ))}
+                      <td className="text-right py-4 px-4 text-sm font-bold text-slate-900 bg-slate-50/50 font-mono">
+                        {formatCurrency(grossMargin)}
+                      </td>
+                    </tr>
+                    <tr className="border-b border-slate-50 hover:bg-slate-50/30 transition-colors">
+                      <td className="py-4 px-4 text-sm font-medium text-slate-700">Gross Margin (%)</td>
+                      {years.map(y => (
+                        <td key={y} className="text-right py-4 px-4 text-sm text-indigo-600 font-bold font-mono">
+                          {grossMarginPercentByYear[y].toFixed(1)}%
+                        </td>
+                      ))}
+                      <td className="text-right py-4 px-4 text-sm font-bold text-indigo-700 bg-indigo-50/30 font-mono">
+                        {calculatedMarginPercent.toFixed(1)}%
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200">
+              <h2 className="text-lg font-medium mb-6">Gross Margin % Trend</h2>
+              <div className="h-80 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={years.map(y => ({
+                      name: `Year ${y + 1}`,
+                      margin: Number(grossMarginPercentByYear[y].toFixed(1))
+                    }))}
+                    margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
+                    <YAxis 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fill: '#64748b', fontSize: 12 }}
+                      tickFormatter={(value) => `${value}%`}
+                    />
+                    <Tooltip 
+                      formatter={(value: number) => [`${value}%`, 'Gross Margin %']}
+                      contentStyle={{ borderRadius: '0.75rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                    />
+                    <Bar dataKey="margin" fill="#8b5cf6" radius={[4, 4, 0, 0]}>
+                      <LabelList dataKey="margin" position="top" formatter={(v: number) => `${v}%`} />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             </div>
           </div>
