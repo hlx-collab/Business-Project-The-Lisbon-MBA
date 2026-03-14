@@ -14,11 +14,21 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'financials' | 'platform'>('financials');
 
   const [platformMetricsStreams, setPlatformMetricsStreams] = useState<FinancialStream[]>(() => {
-    const saved = localStorage.getItem('platformMetricsStreams');
-    return saved ? JSON.parse(saved) : [
+    const defaultStreams = [
       { id: '1', name: 'Number of providers in the platform', amounts: ['', '', '', '', ''], isPermanent: true },
-      { id: '2', name: 'Number of owners in the platform', amounts: ['', '', '', '', ''], isPermanent: true }
+      { id: '2', name: 'Number of owners in the platform', amounts: ['', '', '', '', ''], isPermanent: true },
+      { id: '3', name: 'Avg price per booking', amounts: ['', '', '', '', ''], isPermanent: true },
+      { id: '4', name: '% of bookings commission', amounts: ['', '', '', '', ''], isPermanent: true },
+      { id: '5', name: 'Monthly Subscription fee', amounts: ['', '', '', '', ''], isPermanent: true },
+      { id: '6', name: '# of yearly bookings per pet owners', amounts: ['', '', '', '', ''], isPermanent: true }
     ];
+    const saved = localStorage.getItem('platformMetricsStreams');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      const missing = defaultStreams.filter(ds => !parsed.find((p: any) => p.name === ds.name));
+      return [...parsed, ...missing];
+    }
+    return defaultStreams;
   });
 
   const [chargeSubscription, setChargeSubscription] = useState<boolean[]>(() => {
