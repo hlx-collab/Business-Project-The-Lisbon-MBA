@@ -119,13 +119,65 @@ export default function App() {
       });
       return { ...stream, amounts, isCalculated: true };
     }
+    if (stream.id === '2' || stream.name === 'Booking Fees') {
+      const ownersStream = platformMetricsStreams.find(s => s.id === '2' || s.name === 'Number of owners in the platform');
+      const bookingsPerOwnerStream = platformMetricsStreams.find(s => s.id === '6' || s.name === '# of yearly bookings per pet owners');
+      const avgPriceStream = platformMetricsStreams.find(s => s.id === '3' || s.name === 'Avg price per booking');
+      const commissionStream = platformMetricsStreams.find(s => s.id === '4' || s.name === '% of bookings commission');
+      
+      const amounts = years.map(y => {
+        const owners = Number(ownersStream?.amounts[y]) || 0;
+        const bookingsPerOwner = Number(bookingsPerOwnerStream?.amounts[y]) || 0;
+        const avgPrice = Number(avgPriceStream?.amounts[y]) || 0;
+        const commission = Number(commissionStream?.amounts[y]) || 0;
+        const charge = chargeBookingFees[y] ? 1 : 0;
+        
+        const total = owners * bookingsPerOwner * avgPrice * (commission / 100) * charge;
+        return total;
+      });
+      return { ...stream, amounts, isCalculated: true };
+    }
+    return stream;
+  });
+
+  const derivedVariableCostsStreams = variableCostsStreams.map(stream => {
+    if (stream.id === '1' || stream.name === 'Payment Processing') {
+      const providersStream = platformMetricsStreams.find(s => s.id === '1' || s.name === 'Number of providers in the platform');
+      const subFeeStream = platformMetricsStreams.find(s => s.id === '5' || s.name === 'Monthly Subscription fee');
+      const ownersStream = platformMetricsStreams.find(s => s.id === '2' || s.name === 'Number of owners in the platform');
+      const bookingsPerOwnerStream = platformMetricsStreams.find(s => s.id === '6' || s.name === '# of yearly bookings per pet owners');
+      const avgPriceStream = platformMetricsStreams.find(s => s.id === '3' || s.name === 'Avg price per booking');
+      
+      const amounts = years.map(y => {
+        const providers = Number(providersStream?.amounts[y]) || 0;
+        const subFee = Number(subFeeStream?.amounts[y]) || 0;
+        const chargeSub = chargeSubscription[y] ? 1 : 0;
+        const subTransactions = providers * 12 * chargeSub;
+        const subVolume = subTransactions * subFee;
+
+        const owners = Number(ownersStream?.amounts[y]) || 0;
+        const bookingsPerOwner = Number(bookingsPerOwnerStream?.amounts[y]) || 0;
+        const avgPrice = Number(avgPriceStream?.amounts[y]) || 0;
+        
+        // Payment processing happens for all bookings, even if no platform fee is charged
+        const bookingTransactions = owners * bookingsPerOwner;
+        const bookingVolume = bookingTransactions * avgPrice;
+
+        const totalTransactions = subTransactions + bookingTransactions;
+        const totalVolume = subVolume + bookingVolume;
+
+        const cost = (totalVolume * 0.029) + (totalTransactions * 0.30);
+        return cost;
+      });
+      return { ...stream, amounts, isCalculated: true };
+    }
     return stream;
   });
 
   const getStreamTotal = (stream: FinancialStream) => stream.amounts.reduce((sum, val) => (sum as number) + (typeof val === 'number' ? val : 0), 0) as number;
 
   const totalRevenueByYear = years.map(y => derivedRevenueStreams.reduce((sum, stream) => sum + (typeof stream.amounts[y] === 'number' ? stream.amounts[y] as number : 0), 0));
-  const totalVarCostsByYear = years.map(y => variableCostsStreams.reduce((sum, stream) => sum + (typeof stream.amounts[y] === 'number' ? stream.amounts[y] as number : 0), 0));
+  const totalVarCostsByYear = years.map(y => derivedVariableCostsStreams.reduce((sum, stream) => sum + (typeof stream.amounts[y] === 'number' ? stream.amounts[y] as number : 0), 0));
   const totalFixedCostsByYear = years.map(y => fixedCostsStreams.reduce((sum, stream) => sum + (typeof stream.amounts[y] === 'number' ? stream.amounts[y] as number : 0), 0));
   const totalPlatformMetricsByYear = years.map(y => platformMetricsStreams.reduce((sum, stream) => sum + (typeof stream.amounts[y] === 'number' ? stream.amounts[y] as number : 0), 0));
 
@@ -143,7 +195,7 @@ export default function App() {
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
-      currency: 'USD',
+      currency: 'EUR',
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     }).format(value);
@@ -197,12 +249,12 @@ export default function App() {
   };
 
   const formatCompactCurrency = (value: number) => {
-    if (value === 0) return '$0';
+    if (value === 0) return '€0';
     const absVal = Math.abs(value);
     const sign = value < 0 ? '-' : '';
-    if (absVal >= 1000000) return `${sign}$${(absVal / 1000000).toFixed(1)}M`;
-    if (absVal >= 1000) return `${sign}$${(absVal / 1000).toFixed(0)}k`;
-    return `${sign}$${absVal}`;
+    if (absVal >= 1000000) return `${sign}€${(absVal / 1000000).toFixed(1)}M`;
+    if (absVal >= 1000) return `${sign}€${(absVal / 1000).toFixed(0)}k`;
+    return `${sign}€${absVal}`;
   };
 
   const exportToCSV = () => {
@@ -218,7 +270,7 @@ export default function App() {
     rows.push(['Revenue Total', '', ...totalRevenueByYear.map(String), String(totalRevenue)]);
     
     // Variable Costs
-    variableCostsStreams.forEach(stream => {
+    derivedVariableCostsStreams.forEach(stream => {
       rows.push(['Variable Cost', stream.name, ...stream.amounts.map(a => String(a || 0)), String(getStreamTotal(stream))]);
     });
     rows.push(['Variable Cost Total', '', ...totalVarCostsByYear.map(String), String(totalVariableCosts)]);
@@ -272,7 +324,7 @@ export default function App() {
     rows.push(['Revenue Total', '', ...totalRevenueByYear, totalRevenue]);
     
     // Variable Costs
-    variableCostsStreams.forEach(stream => {
+    derivedVariableCostsStreams.forEach(stream => {
       rows.push(['Variable Cost', stream.name, ...stream.amounts.map(a => Number(a) || 0), getStreamTotal(stream)]);
     });
     rows.push(['Variable Cost Total', '', ...totalVarCostsByYear, totalVariableCosts]);
@@ -493,7 +545,7 @@ export default function App() {
             {/* Inputs Section */}
             <div className="xl:col-span-7 space-y-6">
               {renderStreamSection('Revenue Streams', derivedRevenueStreams, setRevenueStreams, 'Revenue', totalRevenue, totalRevenueByYear)}
-              {renderStreamSection('Variable Costs', variableCostsStreams, setVariableCostsStreams, 'Cost', totalVariableCosts, totalVarCostsByYear)}
+              {renderStreamSection('Variable Costs', derivedVariableCostsStreams, setVariableCostsStreams, 'Cost', totalVariableCosts, totalVarCostsByYear)}
               {renderStreamSection('Fixed Operating Costs', fixedCostsStreams, setFixedCostsStreams, 'Fixed Cost', fixedCosts, totalFixedCostsByYear)}
             </div>
 
@@ -575,7 +627,7 @@ export default function App() {
                       axisLine={false} 
                       tickLine={false} 
                       tick={{ fill: '#64748b', fontSize: 12 }}
-                      tickFormatter={(value) => `$${value >= 1000 ? (value / 1000).toFixed(0) + 'k' : value}`}
+                      tickFormatter={(value) => `€${value >= 1000 ? (value / 1000).toFixed(0) + 'k' : value}`}
                     />
                     <Tooltip 
                       formatter={formatTooltip}
