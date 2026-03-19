@@ -11,142 +11,149 @@ interface FinancialStream {
   isCalculated?: boolean;
 }
 
+type Market = 'Portugal' | 'UK' | 'Aggregated';
+
+interface MarketData {
+  platformMetricsStreams: FinancialStream[];
+  revenueStreams: FinancialStream[];
+  variableCostsStreams: FinancialStream[];
+  fixedCostsStreams: FinancialStream[];
+  chargeSubscription: boolean[];
+  chargeBookingFees: boolean[];
+}
+
+const DEFAULT_PLATFORM_METRICS: FinancialStream[] = [
+  { id: 'pm-1', name: 'Number of providers in the platform', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'pm-2', name: 'Number of owners in the platform', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'pm-3', name: 'Avg price per booking', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'pm-4', name: '% of bookings commission', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'pm-5', name: 'Monthly Subscription fee', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'pm-6', name: '# of yearly bookings per pet owners', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'pm-cac-providers', name: 'Unit CAC - Providers', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'pm-cac-owners', name: 'Unit CAC - Owners', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'pm-cs-providers', name: 'Unit Customer Support cost - Providers', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'pm-cs-owners', name: 'Unit Customer Support cost - Owners', amounts: ['', '', '', '', ''], isPermanent: true }
+];
+
+const DEFAULT_REVENUE_STREAMS: FinancialStream[] = [
+  { id: 'rev-1', name: 'Monthly Subscriptions', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'rev-2', name: 'Booking Fees', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'rev-3', name: 'Others', amounts: ['', '', '', '', ''], isPermanent: true }
+];
+
+const DEFAULT_VARIABLE_COSTS_STREAMS: FinancialStream[] = [
+  { id: 'vc-1', name: 'Payment Processing', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'vc-2', name: 'Customer Support', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'vc-3', name: 'Customer acquisition costs', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'vc-4', name: 'Server/Hosting (AWS/GCP)', amounts: ['', '', '', '', ''], isPermanent: true }
+];
+
+const DEFAULT_FIXED_COSTS_STREAMS: FinancialStream[] = [
+  { id: 'fc-1', name: 'Rent', amounts: ['', '', '', '', ''] },
+  { id: 'fc-2', name: 'Salaries', amounts: ['', '', '', '', ''] },
+  { id: 'fc-3', name: 'Advertisement', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'fc-4', name: 'IT R&D and Support', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'fc-ga', name: 'G&A expenses', amounts: ['', '', '', '', ''], isPermanent: true }
+];
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<'financials' | 'platform' | 'gross-margin'>('financials');
+  const [activeMarket, setActiveMarket] = useState<Market>('Portugal');
 
-  const [platformMetricsStreams, setPlatformMetricsStreams] = useState<FinancialStream[]>(() => {
-    const defaultStreams = [
-      { id: 'pm-1', name: 'Number of providers in the platform', amounts: ['', '', '', '', ''], isPermanent: true },
-      { id: 'pm-2', name: 'Number of owners in the platform', amounts: ['', '', '', '', ''], isPermanent: true },
-      { id: 'pm-3', name: 'Avg price per booking', amounts: ['', '', '', '', ''], isPermanent: true },
-      { id: 'pm-4', name: '% of bookings commission', amounts: ['', '', '', '', ''], isPermanent: true },
-      { id: 'pm-5', name: 'Monthly Subscription fee', amounts: ['', '', '', '', ''], isPermanent: true },
-      { id: 'pm-6', name: '# of yearly bookings per pet owners', amounts: ['', '', '', '', ''], isPermanent: true },
-      { id: 'pm-cac-providers', name: 'Unit CAC - Providers', amounts: ['', '', '', '', ''], isPermanent: true },
-      { id: 'pm-cac-owners', name: 'Unit CAC - Owners', amounts: ['', '', '', '', ''], isPermanent: true },
-      { id: 'pm-cs-providers', name: 'Unit Customer Support cost - Providers', amounts: ['', '', '', '', ''], isPermanent: true },
-      { id: 'pm-cs-owners', name: 'Unit Customer Support cost - Owners', amounts: ['', '', '', '', ''], isPermanent: true }
-    ];
-    const saved = localStorage.getItem('platformMetricsStreams');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      const redundantNames = ['Unit Customer acquisition costs', 'Unit Customer Support cost'];
-      const filtered = parsed.filter((p: any) => !redundantNames.includes(p.name));
-      const merged = filtered.map((p: any) => {
-        const defaultStream = defaultStreams.find(ds => ds.name === p.name);
-        return defaultStream ? { ...p, isPermanent: defaultStream.isPermanent } : p;
-      });
-      const missing = defaultStreams.filter(ds => !merged.find((p: any) => p.name === ds.name));
-      return [...merged, ...missing];
-    }
-    return defaultStreams;
-  });
+  const [markets, setMarkets] = useState<Record<'Portugal' | 'UK', MarketData>>(() => {
+    const defaultMarketData = (): MarketData => ({
+      platformMetricsStreams: [...DEFAULT_PLATFORM_METRICS],
+      revenueStreams: [...DEFAULT_REVENUE_STREAMS],
+      variableCostsStreams: [...DEFAULT_VARIABLE_COSTS_STREAMS],
+      fixedCostsStreams: [...DEFAULT_FIXED_COSTS_STREAMS],
+      chargeSubscription: [false, false, false, false, false],
+      chargeBookingFees: [false, false, false, false, false],
+    });
 
-  const [chargeSubscription, setChargeSubscription] = useState<boolean[]>(() => {
-    const saved = localStorage.getItem('chargeSubscription');
+    const saved = localStorage.getItem('marketsData');
     if (saved) {
-      const parsed = JSON.parse(saved);
-      if (typeof parsed === 'boolean') return Array(5).fill(parsed);
-      return parsed;
+      return JSON.parse(saved);
     }
-    return [false, false, false, false, false];
-  });
 
-  const [chargeBookingFees, setChargeBookingFees] = useState<boolean[]>(() => {
-    const saved = localStorage.getItem('chargeBookingFees');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (typeof parsed === 'boolean') return Array(5).fill(parsed);
-      return parsed;
+    // Migration logic for old data
+    const oldPlatform = localStorage.getItem('platformMetricsStreams');
+    const oldRevenue = localStorage.getItem('revenueStreams');
+    const oldVariable = localStorage.getItem('variableCostsStreams');
+    const oldFixed = localStorage.getItem('fixedCostsStreams');
+    const oldChargeSub = localStorage.getItem('chargeSubscription');
+    const oldChargeBooking = localStorage.getItem('chargeBookingFees');
+
+    if (oldPlatform || oldRevenue || oldVariable || oldFixed) {
+      const portugal: MarketData = {
+        platformMetricsStreams: oldPlatform ? JSON.parse(oldPlatform) : [...DEFAULT_PLATFORM_METRICS],
+        revenueStreams: oldRevenue ? JSON.parse(oldRevenue) : [...DEFAULT_REVENUE_STREAMS],
+        variableCostsStreams: oldVariable ? JSON.parse(oldVariable) : [...DEFAULT_VARIABLE_COSTS_STREAMS],
+        fixedCostsStreams: oldFixed ? JSON.parse(oldFixed) : [...DEFAULT_FIXED_COSTS_STREAMS],
+        chargeSubscription: oldChargeSub ? JSON.parse(oldChargeSub) : [false, false, false, false, false],
+        chargeBookingFees: oldChargeBooking ? JSON.parse(oldChargeBooking) : [false, false, false, false, false],
+      };
+      return { Portugal: portugal, UK: defaultMarketData() };
     }
-    return [false, false, false, false, false];
+
+    return { Portugal: defaultMarketData(), UK: defaultMarketData() };
   });
 
   useEffect(() => {
-    localStorage.setItem('platformMetricsStreams', JSON.stringify(platformMetricsStreams));
-  }, [platformMetricsStreams]);
-
-  useEffect(() => {
-    localStorage.setItem('chargeSubscription', JSON.stringify(chargeSubscription));
-  }, [chargeSubscription]);
-
-  useEffect(() => {
-    localStorage.setItem('chargeBookingFees', JSON.stringify(chargeBookingFees));
-  }, [chargeBookingFees]);
-
-  const [revenueStreams, setRevenueStreams] = useState<FinancialStream[]>(() => {
-    const defaultStreams = [
-      { id: 'rev-1', name: 'Monthly Subscriptions', amounts: ['', '', '', '', ''], isPermanent: true },
-      { id: 'rev-2', name: 'Booking Fees', amounts: ['', '', '', '', ''], isPermanent: true },
-      { id: 'rev-3', name: 'Others', amounts: ['', '', '', '', ''], isPermanent: true }
-    ];
-    const saved = localStorage.getItem('revenueStreams');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      const merged = parsed.map((p: any) => {
-        const defaultStream = defaultStreams.find(ds => ds.name === p.name);
-        return defaultStream ? { ...p, isPermanent: defaultStream.isPermanent } : p;
-      });
-      const missing = defaultStreams.filter(ds => !merged.find((p: any) => p.name === ds.name));
-      return [...merged, ...missing];
-    }
-    return defaultStreams;
-  });
-  
-  const [variableCostsStreams, setVariableCostsStreams] = useState<FinancialStream[]>(() => {
-    const defaultStreams = [
-      { id: 'vc-1', name: 'Payment Processing', amounts: ['', '', '', '', ''], isPermanent: true },
-      { id: 'vc-2', name: 'Customer Support', amounts: ['', '', '', '', ''], isPermanent: true },
-      { id: 'vc-3', name: 'Customer acquisition costs', amounts: ['', '', '', '', ''], isPermanent: true },
-      { id: 'vc-4', name: 'Server/Hosting (AWS/GCP)', amounts: ['', '', '', '', ''], isPermanent: true }
-    ];
-    const saved = localStorage.getItem('variableCostsStreams');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      const merged = parsed.map((p: any) => {
-        const defaultStream = defaultStreams.find(ds => ds.name === p.name);
-        return defaultStream ? { ...p, isPermanent: defaultStream.isPermanent } : p;
-      });
-      const missing = defaultStreams.filter(ds => !merged.find((p: any) => p.name === ds.name));
-      return [...merged, ...missing];
-    }
-    return defaultStreams;
-  });
-
-  const [fixedCostsStreams, setFixedCostsStreams] = useState<FinancialStream[]>(() => {
-    const defaultStreams = [
-      { id: 'fc-1', name: 'Rent', amounts: ['', '', '', '', ''] },
-      { id: 'fc-2', name: 'Salaries', amounts: ['', '', '', '', ''] },
-      { id: 'fc-3', name: 'Advertisement', amounts: ['', '', '', '', ''], isPermanent: true },
-      { id: 'fc-4', name: 'IT R&D and Support', amounts: ['', '', '', '', ''], isPermanent: true },
-      { id: 'fc-ga', name: 'G&A expenses', amounts: ['', '', '', '', ''], isPermanent: true }
-    ];
-    const saved = localStorage.getItem('fixedCostsStreams');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      const merged = parsed.map((p: any) => {
-        const defaultStream = defaultStreams.find(ds => ds.name === p.name);
-        return defaultStream ? { ...p, isPermanent: defaultStream.isPermanent } : p;
-      });
-      const missing = defaultStreams.filter(ds => !merged.find((p: any) => p.name === ds.name));
-      return [...merged, ...missing];
-    }
-    return defaultStreams;
-  });
-
-  useEffect(() => {
-    localStorage.setItem('revenueStreams', JSON.stringify(revenueStreams));
-  }, [revenueStreams]);
-
-  useEffect(() => {
-    localStorage.setItem('variableCostsStreams', JSON.stringify(variableCostsStreams));
-  }, [variableCostsStreams]);
-
-  useEffect(() => {
-    localStorage.setItem('fixedCostsStreams', JSON.stringify(fixedCostsStreams));
-  }, [fixedCostsStreams]);
+    localStorage.setItem('marketsData', JSON.stringify(markets));
+  }, [markets]);
 
   const years = [0, 1, 2, 3, 4];
+
+  const currentMarketData = React.useMemo(() => {
+    if (activeMarket === 'Aggregated') {
+      const pt = markets.Portugal;
+      const uk = markets.UK;
+
+      const aggregateStreams = (s1: FinancialStream[], s2: FinancialStream[]) => {
+        // Map by name to handle custom streams
+        const allNames = Array.from(new Set([...s1.map(s => s.name), ...s2.map(s => s.name)]));
+        return allNames.map(name => {
+          const st1 = s1.find(s => s.name === name);
+          const st2 = s2.find(s => s.name === name);
+          const amounts = years.map(y => (Number(st1?.amounts[y]) || 0) + (Number(st2?.amounts[y]) || 0));
+          return {
+            id: `agg-${name}`,
+            name,
+            amounts,
+            isPermanent: st1?.isPermanent || st2?.isPermanent,
+            isCalculated: true
+          };
+        });
+      };
+
+      return {
+        platformMetricsStreams: aggregateStreams(pt.platformMetricsStreams, uk.platformMetricsStreams),
+        revenueStreams: aggregateStreams(pt.revenueStreams, uk.revenueStreams),
+        variableCostsStreams: aggregateStreams(pt.variableCostsStreams, uk.variableCostsStreams),
+        fixedCostsStreams: aggregateStreams(pt.fixedCostsStreams, uk.fixedCostsStreams),
+        chargeSubscription: pt.chargeSubscription.map((v, i) => v || uk.chargeSubscription[i]),
+        chargeBookingFees: pt.chargeBookingFees.map((v, i) => v || uk.chargeBookingFees[i]),
+      };
+    }
+    return markets[activeMarket];
+  }, [activeMarket, markets]);
+
+  const {
+    platformMetricsStreams,
+    revenueStreams,
+    variableCostsStreams,
+    fixedCostsStreams,
+    chargeSubscription,
+    chargeBookingFees
+  } = currentMarketData;
+
+  const updateMarketData = (updater: (prev: MarketData) => MarketData) => {
+    if (activeMarket === 'Aggregated') return;
+    setMarkets(prev => ({
+      ...prev,
+      [activeMarket]: updater(prev[activeMarket])
+    }));
+  };
 
   const derivedRevenueStreams = revenueStreams.map(stream => {
     if (stream.id === 'rev-1' || stream.name === 'Monthly Subscriptions') {
@@ -283,31 +290,54 @@ export default function App() {
     }).format(value);
   };
 
-  const addStream = (streams: FinancialStream[], setStreams: React.Dispatch<React.SetStateAction<FinancialStream[]>>, prefix: string) => {
+  const addStream = (streams: FinancialStream[], prefix: string, key: keyof MarketData) => {
+    if (activeMarket === 'Aggregated') return;
     const sectionId = prefix.toLowerCase().replace(/\s+/g, '-');
-    setStreams([
-      ...streams,
-      { id: `${sectionId}-${Date.now()}`, name: `${prefix} ${streams.length + 1}`, amounts: ['', '', '', '', ''] }
-    ]);
-  };
-
-  const updateStreamName = (streams: FinancialStream[], setStreams: React.Dispatch<React.SetStateAction<FinancialStream[]>>, id: string, name: string) => {
-    setStreams(streams.map(stream => stream.id === id ? { ...stream, name } : stream));
-  };
-
-  const updateStreamAmount = (streams: FinancialStream[], setStreams: React.Dispatch<React.SetStateAction<FinancialStream[]>>, id: string, yearIndex: number, value: number | '') => {
-    setStreams(streams.map(stream => {
-      if (stream.id === id) {
-        const newAmounts = [...stream.amounts];
-        newAmounts[yearIndex] = value;
-        return { ...stream, amounts: newAmounts };
-      }
-      return stream;
+    const newStream = { id: `${sectionId}-${Date.now()}`, name: `${prefix} ${streams.length + 1}`, amounts: ['', '', '', '', ''] };
+    updateMarketData(prev => ({
+      ...prev,
+      [key]: [...(prev[key] as FinancialStream[]), newStream]
     }));
   };
 
-  const removeStream = (streams: FinancialStream[], setStreams: React.Dispatch<React.SetStateAction<FinancialStream[]>>, id: string) => {
-    setStreams(streams.filter(stream => stream.id !== id));
+  const updateStreamName = (streams: FinancialStream[], id: string, name: string, key: keyof MarketData) => {
+    if (activeMarket === 'Aggregated') return;
+    updateMarketData(prev => ({
+      ...prev,
+      [key]: (prev[key] as FinancialStream[]).map(stream => stream.id === id ? { ...stream, name } : stream)
+    }));
+  };
+
+  const updateStreamAmount = (streams: FinancialStream[], id: string, yearIndex: number, value: number | '', key: keyof MarketData) => {
+    if (activeMarket === 'Aggregated') return;
+    updateMarketData(prev => ({
+      ...prev,
+      [key]: (prev[key] as FinancialStream[]).map(stream => {
+        if (stream.id === id) {
+          const newAmounts = [...stream.amounts];
+          newAmounts[yearIndex] = value;
+          return { ...stream, amounts: newAmounts };
+        }
+        return stream;
+      })
+    }));
+  };
+
+  const removeStream = (streams: FinancialStream[], id: string, key: keyof MarketData) => {
+    if (activeMarket === 'Aggregated') return;
+    updateMarketData(prev => ({
+      ...prev,
+      [key]: (prev[key] as FinancialStream[]).filter(stream => stream.id !== id)
+    }));
+  };
+
+  const toggleCharge = (yearIndex: number, key: 'chargeSubscription' | 'chargeBookingFees') => {
+    if (activeMarket === 'Aggregated') return;
+    updateMarketData(prev => {
+      const newVal = [...prev[key]];
+      newVal[yearIndex] = !newVal[yearIndex];
+      return { ...prev, [key]: newVal };
+    });
   };
 
   const chartData = [...years.map(y => ({
@@ -469,13 +499,14 @@ export default function App() {
   const renderStreamSection = (
     title: string, 
     streams: FinancialStream[], 
-    setStreams: React.Dispatch<React.SetStateAction<FinancialStream[]>>, 
     prefix: string, 
     total: number,
     totalsByYear: number[],
+    stateKey: keyof MarketData,
     formatType: 'currency' | 'number' = 'currency'
   ) => {
     const formatValue = (val: number) => formatType === 'currency' ? formatCurrency(val) : new Intl.NumberFormat('en-US').format(val);
+    const isReadOnly = activeMarket === 'Aggregated';
     
     return (
     <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6">
@@ -484,13 +515,15 @@ export default function App() {
           <Activity className="w-5 h-5 text-slate-400" />
           <span>{title}</span>
         </h2>
-        <button 
-          onClick={() => addStream(streams, setStreams, prefix)}
-          className="text-sm flex items-center space-x-1 text-indigo-600 hover:text-indigo-700 font-medium"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Add Stream</span>
-        </button>
+        {!isReadOnly && (
+          <button 
+            onClick={() => addStream(streams, prefix, stateKey)}
+            className="text-sm flex items-center space-x-1 text-indigo-600 hover:text-indigo-700 font-medium"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add Stream</span>
+          </button>
+        )}
       </div>
       
       <div className="space-y-6">
@@ -508,7 +541,7 @@ export default function App() {
         {streams.map((stream) => (
           <div key={`${title}-${stream.id}`} className="flex flex-col sm:flex-row sm:items-center space-y-3 sm:space-y-0 sm:space-x-3 p-3 bg-slate-50/50 rounded-xl border border-slate-100">
             <div className="flex-1 flex items-center space-x-2">
-              {stream.isPermanent ? (
+              {stream.isPermanent || isReadOnly ? (
                 <div className="block w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 truncate">
                   {stream.name}
                 </div>
@@ -516,14 +549,14 @@ export default function App() {
                 <input
                   type="text"
                   value={stream.name}
-                  onChange={(e) => updateStreamName(streams, setStreams, stream.id, e.target.value)}
+                  onChange={(e) => updateStreamName(streams, stream.id, e.target.value, stateKey)}
                   className="block w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-colors"
                   placeholder={`${prefix} Type`}
                 />
               )}
-              {!stream.isPermanent && (
+              {!stream.isPermanent && !isReadOnly && (
                 <button 
-                  onClick={() => removeStream(streams, setStreams, stream.id)}
+                  onClick={() => removeStream(streams, stream.id, stateKey)}
                   className="p-2 text-slate-400 hover:text-red-500 transition-colors rounded-lg hover:bg-red-50 flex-shrink-0"
                   title="Remove"
                 >
@@ -538,10 +571,10 @@ export default function App() {
                   <input
                     type="number"
                     value={stream.amounts[y]}
-                    onChange={(e) => updateStreamAmount(streams, setStreams, stream.id, y, e.target.value ? Number(e.target.value) : '')}
-                    className={`block w-full px-1 py-2 border border-slate-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-xs text-center transition-colors ${stream.isCalculated ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : ''}`}
+                    onChange={(e) => updateStreamAmount(streams, stream.id, y, e.target.value ? Number(e.target.value) : '', stateKey)}
+                    className={`block w-full px-1 py-2 border border-slate-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-xs text-center transition-colors ${(stream.isCalculated || isReadOnly) ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : ''}`}
                     placeholder="0"
-                    disabled={stream.isCalculated}
+                    disabled={stream.isCalculated || isReadOnly}
                   />
                 </div>
               ))}
@@ -583,6 +616,21 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center space-x-3">
+            <div className="flex bg-white p-1 rounded-xl border border-slate-200 shadow-sm mr-4">
+              {(['Portugal', 'UK', 'Aggregated'] as Market[]).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setActiveMarket(m)}
+                  className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    activeMarket === m
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                  }`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
             <button
               onClick={exportToCSV}
               className="flex items-center justify-center space-x-2 px-4 py-2 bg-white border border-slate-200 rounded-lg shadow-sm text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-indigo-600 transition-colors"
@@ -637,9 +685,9 @@ export default function App() {
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
             {/* Inputs Section */}
             <div className="xl:col-span-7 space-y-6">
-              {renderStreamSection('Revenue Streams', derivedRevenueStreams, setRevenueStreams, 'Revenue', totalRevenue, totalRevenueByYear)}
-              {renderStreamSection('Variable Costs', derivedVariableCostsStreams, setVariableCostsStreams, 'Cost', totalVariableCosts, totalVarCostsByYear)}
-              {renderStreamSection('Fixed Operating Costs', fixedCostsStreams, setFixedCostsStreams, 'Fixed Cost', fixedCosts, totalFixedCostsByYear)}
+              {renderStreamSection('Revenue Streams', derivedRevenueStreams, 'Revenue', totalRevenue, totalRevenueByYear, 'revenueStreams')}
+              {renderStreamSection('Variable Costs', derivedVariableCostsStreams, 'Cost', totalVariableCosts, totalVarCostsByYear, 'variableCostsStreams')}
+              {renderStreamSection('Fixed Operating Costs', fixedCostsStreams, 'Fixed Cost', fixedCosts, totalFixedCostsByYear, 'fixedCostsStreams')}
             </div>
 
             {/* Outputs & Visualization Section */}
@@ -759,7 +807,7 @@ export default function App() {
         {activeTab === 'platform' && (
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
             <div className="xl:col-span-7 space-y-6">
-              {renderStreamSection('Platform Metrics', platformMetricsStreams, setPlatformMetricsStreams, 'Metric', totalPlatformMetrics, totalPlatformMetricsByYear, 'number')}
+              {renderStreamSection('Platform Metrics', platformMetricsStreams, 'Metric', totalPlatformMetrics, totalPlatformMetricsByYear, 'platformMetricsStreams', 'number')}
               
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6">
                 <h2 className="text-lg font-medium flex items-center space-x-2">
@@ -778,16 +826,13 @@ export default function App() {
                         <div key={y} className="flex flex-col items-center space-y-1">
                           <span className="text-[10px] font-medium text-slate-500 uppercase">Y{y+1}</span>
                           <button
-                            onClick={() => {
-                              const newVals = [...chargeSubscription];
-                              newVals[y] = !newVals[y];
-                              setChargeSubscription(newVals);
-                            }}
+                            onClick={() => toggleCharge(y, 'chargeSubscription')}
+                            disabled={activeMarket === 'Aggregated'}
                             className={`w-full py-1.5 text-xs font-medium rounded-md transition-colors ${
                               chargeSubscription[y] 
                                 ? 'bg-indigo-600 text-white shadow-sm' 
                                 : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-                            }`}
+                            } ${activeMarket === 'Aggregated' ? 'opacity-50 cursor-not-allowed' : ''}`}
                           >
                             {chargeSubscription[y] ? 'Yes' : 'No'}
                           </button>
@@ -806,16 +851,13 @@ export default function App() {
                         <div key={y} className="flex flex-col items-center space-y-1">
                           <span className="text-[10px] font-medium text-slate-500 uppercase">Y{y+1}</span>
                           <button
-                            onClick={() => {
-                              const newVals = [...chargeBookingFees];
-                              newVals[y] = !newVals[y];
-                              setChargeBookingFees(newVals);
-                            }}
+                            onClick={() => toggleCharge(y, 'chargeBookingFees')}
+                            disabled={activeMarket === 'Aggregated'}
                             className={`w-full py-1.5 text-xs font-medium rounded-md transition-colors ${
                               chargeBookingFees[y] 
                                 ? 'bg-indigo-600 text-white shadow-sm' 
                                 : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-                            }`}
+                            } ${activeMarket === 'Aggregated' ? 'opacity-50 cursor-not-allowed' : ''}`}
                           >
                             {chargeBookingFees[y] ? 'Yes' : 'No'}
                           </button>
