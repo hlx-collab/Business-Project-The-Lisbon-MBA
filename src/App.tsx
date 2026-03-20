@@ -386,17 +386,17 @@ export default function App() {
 
   const chartData = [...years.map(y => ({
     name: `Year ${y + 1}`,
-    'Total Revenue': totalRevenueByYear[y],
-    'Total Var. Costs': totalVarCostsByYear[y],
+    'Revenues': totalRevenueByYear[y],
+    'Var. Costs': totalVarCostsByYear[y],
     'Gross Margin': grossMarginByYear[y],
-    'Total Fixed Costs': totalFixedCostsByYear[y],
+    'Fixed Costs': totalFixedCostsByYear[y],
     'Op. Profit': opProfitByYear[y]
   })), {
     name: 'Total',
-    'Total Revenue': totalRevenue,
-    'Total Var. Costs': totalVariableCosts,
+    'Revenues': totalRevenue,
+    'Var. Costs': totalVariableCosts,
     'Gross Margin': grossMargin,
-    'Total Fixed Costs': fixedCosts,
+    'Fixed Costs': fixedCosts,
     'Op. Profit': operatingProfit
   }];
 
@@ -577,7 +577,7 @@ export default function App() {
       <text 
         x={x + width / 2} 
         y={yPos} 
-        fill="#1e293b" 
+        fill={isNegative ? "#ef4444" : "#1e293b"} 
         textAnchor="middle" 
         dominantBaseline="middle" 
         fontSize={10} 
@@ -665,13 +665,13 @@ export default function App() {
                     type="number"
                     value={stream.amounts[y]}
                     onChange={(e) => updateStreamAmount(streams, stream.id, y, e.target.value ? Number(e.target.value) : '', stateKey)}
-                    className={`block w-full px-1 py-2 border border-slate-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-xs text-center transition-colors ${(stream.isCalculated || isReadOnly) ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : ''}`}
+                    className={`block w-full px-1 py-2 border border-slate-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-xs text-center transition-colors ${(stream.isCalculated || isReadOnly) ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : ''} ${Number(stream.amounts[y]) < 0 ? 'text-red-600' : ''}`}
                     placeholder="0"
                     disabled={stream.isCalculated || isReadOnly}
                   />
                 </div>
               ))}
-              <div className="flex items-center justify-end text-sm font-semibold text-slate-700 truncate">
+              <div className={`flex items-center justify-end text-sm font-semibold truncate ${getStreamTotal(stream) >= 0 ? 'text-slate-700' : 'text-red-600'}`}>
                 {formatValue(getStreamTotal(stream))}
               </div>
             </div>
@@ -682,11 +682,11 @@ export default function App() {
         <div className="flex-1 text-sm font-medium text-slate-500">Total {title}</div>
         <div className="grid grid-cols-6 gap-2 w-full sm:max-w-[400px]">
           {years.map(y => (
-            <div key={y} className="text-center text-xs font-semibold text-slate-700 truncate">
+            <div key={y} className={`text-center text-xs font-semibold truncate ${totalsByYear[y] >= 0 ? 'text-slate-700' : 'text-red-600'}`}>
               {formatValue(totalsByYear[y])}
             </div>
           ))}
-          <div className="flex items-center justify-end text-sm font-bold text-slate-900 truncate">
+          <div className={`flex items-center justify-end text-sm font-bold truncate ${total >= 0 ? 'text-slate-900' : 'text-red-700'}`}>
             {formatValue(total)}
           </div>
         </div>
@@ -799,23 +799,27 @@ export default function App() {
                       <tr className="border-b border-slate-50">
                         <td className="py-2 px-2 font-medium text-slate-700">Revenues</td>
                         {years.map(y => (
-                          <td key={y} className="text-right py-2 px-2 text-slate-600 font-mono">{formatCurrency(totalRevenueByYear[y])}</td>
+                          <td key={y} className={`text-right py-2 px-2 font-mono ${totalRevenueByYear[y] >= 0 ? 'text-slate-600' : 'text-red-600'}`}>{formatCurrency(totalRevenueByYear[y])}</td>
                         ))}
-                        <td className="text-right py-2 px-2 font-bold text-slate-900 bg-slate-50/50 font-mono">{formatCurrency(totalRevenue)}</td>
+                        <td className={`text-right py-2 px-2 font-bold bg-slate-50/50 font-mono ${totalRevenue >= 0 ? 'text-slate-900' : 'text-red-900'}`}>{formatCurrency(totalRevenue)}</td>
                       </tr>
                       <tr className="border-b border-slate-50">
                         <td className="py-2 px-2 font-medium text-slate-700">Variable Costs</td>
                         {years.map(y => (
-                          <td key={y} className="text-right py-2 px-2 text-slate-600 font-mono">{formatCurrency(totalVarCostsByYear[y])}</td>
+                          <td key={y} className={`text-right py-2 px-2 font-mono ${totalVarCostsByYear[y] >= 0 ? 'text-slate-600' : 'text-red-600'}`}>{formatCurrency(totalVarCostsByYear[y])}</td>
                         ))}
-                        <td className="text-right py-2 px-2 font-bold text-slate-900 bg-slate-50/50 font-mono">{formatCurrency(totalVariableCosts)}</td>
+                        <td className={`text-right py-2 px-2 font-bold bg-slate-50/50 font-mono ${totalVariableCosts >= 0 ? 'text-slate-900' : 'text-red-900'}`}>{formatCurrency(totalVariableCosts)}</td>
                       </tr>
                       <tr className="border-b border-slate-50 bg-emerald-50/30">
                         <td className="py-2 px-2 font-semibold text-emerald-700">Gross Margin</td>
                         {years.map(y => (
-                          <td key={y} className="text-right py-2 px-2 text-emerald-600 font-bold font-mono">{formatCurrency(grossMarginByYear[y])}</td>
+                          <td key={y} className={`text-right py-2 px-2 font-bold font-mono ${grossMarginByYear[y] >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                            {formatCurrency(grossMarginByYear[y])}
+                          </td>
                         ))}
-                        <td className="text-right py-2 px-2 font-bold text-emerald-800 bg-emerald-50/50 font-mono">{formatCurrency(grossMargin)}</td>
+                        <td className={`text-right py-2 px-2 font-bold bg-emerald-50/50 font-mono ${grossMargin >= 0 ? 'text-emerald-800' : 'text-red-800'}`}>
+                          {formatCurrency(grossMargin)}
+                        </td>
                       </tr>
                       <tr className="border-b border-slate-50 bg-emerald-50/10">
                         <td className="py-2 px-2 text-xs font-medium text-emerald-600 italic pl-4">Gross Margin %</td>
@@ -827,9 +831,9 @@ export default function App() {
                       <tr className="border-b border-slate-50">
                         <td className="py-2 px-2 font-medium text-slate-700">Fixed Costs</td>
                         {years.map(y => (
-                          <td key={y} className="text-right py-2 px-2 text-slate-600 font-mono">{formatCurrency(totalFixedCostsByYear[y])}</td>
+                          <td key={y} className={`text-right py-2 px-2 font-mono ${totalFixedCostsByYear[y] >= 0 ? 'text-slate-600' : 'text-red-600'}`}>{formatCurrency(totalFixedCostsByYear[y])}</td>
                         ))}
-                        <td className="text-right py-2 px-2 font-bold text-slate-900 bg-slate-50/50 font-mono">{formatCurrency(fixedCosts)}</td>
+                        <td className={`text-right py-2 px-2 font-bold bg-slate-50/50 font-mono ${fixedCosts >= 0 ? 'text-slate-900' : 'text-red-900'}`}>{formatCurrency(fixedCosts)}</td>
                       </tr>
                       <tr className="bg-indigo-50/30">
                         <td className="py-2 px-2 font-semibold text-indigo-700">Operating Profit</td>
@@ -871,7 +875,7 @@ export default function App() {
                   <div className="flex justify-between items-start">
                     <div>
                       <p className="text-sm font-medium text-slate-500">5-Year Gross Margin ({calculatedMarginPercent.toFixed(1)}%)</p>
-                      <p className="mt-2 text-3xl font-semibold text-slate-900">
+                      <p className={`mt-2 text-3xl font-semibold ${grossMargin >= 0 ? 'text-slate-900' : 'text-red-600'}`}>
                         {formatCurrency(grossMargin)}
                       </p>
                     </div>
@@ -886,7 +890,9 @@ export default function App() {
                     {years.map(y => (
                       <div key={y} className="text-center">
                         <div className="text-[10px] text-slate-400 uppercase font-semibold">Y{y+1}</div>
-                        <div className="text-xs font-medium text-slate-700 mt-1">{formatCurrency(grossMarginByYear[y])}</div>
+                        <div className={`text-xs font-medium mt-1 ${grossMarginByYear[y] >= 0 ? 'text-slate-700' : 'text-red-600'}`}>
+                          {formatCurrency(grossMarginByYear[y])}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -912,8 +918,8 @@ export default function App() {
                 <div className={`mt-6 grid grid-cols-5 gap-2 pt-4 border-t ${operatingProfit >= 0 ? 'border-indigo-100/50' : 'border-red-100/50'}`}>
                   {years.map(y => (
                     <div key={y} className="text-center">
-                      <div className={`text-[10px] uppercase font-semibold ${operatingProfit >= 0 ? 'text-indigo-400' : 'text-red-400'}`}>Y{y+1}</div>
-                      <div className={`text-xs font-medium mt-1 ${operatingProfit >= 0 ? 'text-indigo-700' : 'text-red-700'}`}>{formatCurrency(opProfitByYear[y])}</div>
+                      <div className={`text-[10px] uppercase font-semibold ${opProfitByYear[y] >= 0 ? 'text-indigo-400' : 'text-red-400'}`}>Y{y+1}</div>
+                      <div className={`text-xs font-medium mt-1 ${opProfitByYear[y] >= 0 ? 'text-indigo-700' : 'text-red-700'}`}>{formatCurrency(opProfitByYear[y])}</div>
                     </div>
                   ))}
                 </div>
@@ -953,18 +959,34 @@ export default function App() {
                       verticalAlign="middle" 
                       align="right"
                       wrapperStyle={{ paddingLeft: '20px' }}
+                      content={(props) => {
+                        const { payload } = props;
+                        const order = ['Revenues', 'Var. Costs', 'Gross Margin', 'Fixed Costs', 'Op. Profit'];
+                        const sortedPayload = order.map(name => payload?.find((p: any) => p.value === name)).filter(Boolean);
+                        
+                        return (
+                          <div className="flex flex-col space-y-2 pl-5">
+                            {sortedPayload.map((entry: any, index: number) => (
+                              <div key={`item-${index}`} className="flex items-center space-x-2">
+                                <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: entry.color }}></div>
+                                <span className="text-sm font-medium" style={{ color: entry.color }}>{entry.value}</span>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      }}
                     />
-                    <Bar dataKey="Total Revenue" fill="#3b82f6">
-                      <LabelList dataKey="Total Revenue" content={renderCustomBarLabel} />
+                    <Bar dataKey="Revenues" fill="#3b82f6">
+                      <LabelList dataKey="Revenues" content={renderCustomBarLabel} />
                     </Bar>
-                    <Bar dataKey="Total Var. Costs" fill="#f59e0b">
-                      <LabelList dataKey="Total Var. Costs" content={renderCustomBarLabel} />
+                    <Bar dataKey="Var. Costs" fill="#f59e0b">
+                      <LabelList dataKey="Var. Costs" content={renderCustomBarLabel} />
                     </Bar>
                     <Bar dataKey="Gross Margin" fill="#8b5cf6">
                       <LabelList dataKey="Gross Margin" content={renderCustomBarLabel} />
                     </Bar>
-                    <Bar dataKey="Total Fixed Costs" fill="#f97316">
-                      <LabelList dataKey="Total Fixed Costs" content={renderCustomBarLabel} />
+                    <Bar dataKey="Fixed Costs" fill="#f97316">
+                      <LabelList dataKey="Fixed Costs" content={renderCustomBarLabel} />
                     </Bar>
                     <Bar dataKey="Op. Profit" fill={operatingProfit >= 0 ? '#10b981' : '#ef4444'}>
                       <LabelList dataKey="Op. Profit" content={renderCustomBarLabel} />
