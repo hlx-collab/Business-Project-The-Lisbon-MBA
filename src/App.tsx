@@ -254,39 +254,6 @@ export default function App() {
     };
   };
 
-  const currentMarketData = React.useMemo(() => {
-    if (activeMarket === 'Aggregated') {
-      const pt = markets.Portugal;
-      const uk = markets.UK;
-
-      const aggregateStreams = (s1: FinancialStream[], s2: FinancialStream[]) => {
-        const allNames = Array.from(new Set([...s1.map(s => s.name), ...s2.map(s => s.name)]));
-        return allNames.map(name => {
-          const st1 = s1.find(s => s.name === name);
-          const st2 = s2.find(s => s.name === name);
-          const amounts = years.map(y => (Number(st1?.amounts[y]) || 0) + (Number(st2?.amounts[y]) || 0));
-          return {
-            id: `agg-${name}`,
-            name,
-            amounts,
-            isPermanent: st1?.isPermanent || st2?.isPermanent,
-            isCalculated: true
-          };
-        });
-      };
-
-      return {
-        platformMetricsStreams: aggregateStreams(pt.platformMetricsStreams, uk.platformMetricsStreams),
-        revenueStreams: aggregateStreams(pt.revenueStreams, uk.revenueStreams),
-        variableCostsStreams: aggregateStreams(pt.variableCostsStreams, uk.variableCostsStreams),
-        fixedCostsStreams: aggregateStreams(pt.fixedCostsStreams, uk.fixedCostsStreams),
-        chargeSubscription: pt.chargeSubscription.map((v, i) => v || uk.chargeSubscription[i]),
-        chargeBookingFees: pt.chargeBookingFees.map((v, i) => v || uk.chargeBookingFees[i]),
-      };
-    }
-    return markets[activeMarket];
-  }, [activeMarket, markets]);
-
   const updateMarketData = (updater: (prev: MarketData) => MarketData) => {
     if (activeMarket === 'Aggregated') return;
     setMarkets(prev => ({
@@ -320,10 +287,81 @@ export default function App() {
     operatingProfit,
     calculatedMarginPercent,
     calculatedOpProfitPercent
-  } = React.useMemo(() => ({
-    ...currentMarketData,
-    ...calculateFinancials(currentMarketData)
-  }), [currentMarketData]);
+  } = React.useMemo(() => {
+    if (activeMarket === 'Aggregated') {
+      const pt = markets.Portugal;
+      const uk = markets.UK;
+      const ptFin = { ...pt, ...calculateFinancials(pt) };
+      const ukFin = { ...uk, ...calculateFinancials(uk) };
+
+      const aggregateStreams = (s1: FinancialStream[], s2: FinancialStream[]) => {
+        const allNames = Array.from(new Set([...s1.map(s => s.name), ...s2.map(s => s.name)]));
+        return allNames.map(name => {
+          const st1 = s1.find(s => s.name === name);
+          const st2 = s2.find(s => s.name === name);
+          const amounts = years.map(y => (Number(st1?.amounts[y]) || 0) + (Number(st2?.amounts[y]) || 0));
+          return {
+            id: `agg-${name}`,
+            name,
+            amounts,
+            isPermanent: st1?.isPermanent || st2?.isPermanent,
+            isCalculated: st1?.isCalculated || st2?.isCalculated
+          };
+        });
+      };
+
+      const totalRevenueByYear = years.map(y => ptFin.totalRevenueByYear[y] + ukFin.totalRevenueByYear[y]);
+      const totalVarCostsByYear = years.map(y => ptFin.totalVarCostsByYear[y] + ukFin.totalVarCostsByYear[y]);
+      const totalFixedCostsByYear = years.map(y => ptFin.totalFixedCostsByYear[y] + ukFin.totalFixedCostsByYear[y]);
+      const totalPlatformMetricsByYear = years.map(y => ptFin.totalPlatformMetricsByYear[y] + ukFin.totalPlatformMetricsByYear[y]);
+      const grossMarginByYear = years.map(y => ptFin.grossMarginByYear[y] + ukFin.grossMarginByYear[y]);
+      const opProfitByYear = years.map(y => ptFin.opProfitByYear[y] + ukFin.opProfitByYear[y]);
+
+      const totalRevenue = ptFin.totalRevenue + ukFin.totalRevenue;
+      const totalVariableCosts = ptFin.totalVariableCosts + ukFin.totalVariableCosts;
+      const fixedCosts = ptFin.fixedCosts + ukFin.fixedCosts;
+      const totalPlatformMetrics = ptFin.totalPlatformMetrics + ukFin.totalPlatformMetrics;
+      const grossMargin = ptFin.grossMargin + ukFin.grossMargin;
+      const operatingProfit = ptFin.operatingProfit + ukFin.operatingProfit;
+
+      const calculatedMarginPercent = totalRevenue > 0 ? (grossMargin / totalRevenue) * 100 : 0;
+      const calculatedOpProfitPercent = totalRevenue > 0 ? (operatingProfit / totalRevenue) * 100 : 0;
+      const grossMarginPercentByYear = years.map(y => totalRevenueByYear[y] > 0 ? (grossMarginByYear[y] / totalRevenueByYear[y]) * 100 : 0);
+      const opProfitPercentByYear = years.map(y => totalRevenueByYear[y] > 0 ? (opProfitByYear[y] / totalRevenueByYear[y]) * 100 : 0);
+
+      return {
+        platformMetricsStreams: aggregateStreams(ptFin.platformMetricsStreams, ukFin.platformMetricsStreams),
+        revenueStreams: aggregateStreams(ptFin.revenueStreams, ukFin.revenueStreams),
+        variableCostsStreams: aggregateStreams(ptFin.variableCostsStreams, ukFin.variableCostsStreams),
+        fixedCostsStreams: aggregateStreams(ptFin.fixedCostsStreams, ukFin.fixedCostsStreams),
+        derivedRevenueStreams: aggregateStreams(ptFin.derivedRevenueStreams, ukFin.derivedRevenueStreams),
+        derivedVariableCostsStreams: aggregateStreams(ptFin.derivedVariableCostsStreams, ukFin.derivedVariableCostsStreams),
+        chargeSubscription: ptFin.chargeSubscription.map((v, i) => v || ukFin.chargeSubscription[i]),
+        chargeBookingFees: ptFin.chargeBookingFees.map((v, i) => v || ukFin.chargeBookingFees[i]),
+        totalRevenueByYear,
+        totalVarCostsByYear,
+        totalFixedCostsByYear,
+        totalPlatformMetricsByYear,
+        grossMarginByYear,
+        grossMarginPercentByYear,
+        opProfitByYear,
+        opProfitPercentByYear,
+        totalRevenue,
+        totalVariableCosts,
+        fixedCosts,
+        totalPlatformMetrics,
+        grossMargin,
+        operatingProfit,
+        calculatedMarginPercent,
+        calculatedOpProfitPercent
+      };
+    }
+    const currentMarketData = markets[activeMarket];
+    return {
+      ...currentMarketData,
+      ...calculateFinancials(currentMarketData)
+    };
+  }, [activeMarket, markets]);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -387,14 +425,14 @@ export default function App() {
   const chartData = [...years.map(y => ({
     name: `Year ${y + 1}`,
     'Revenues': totalRevenueByYear[y],
-    'Var. Costs': totalVarCostsByYear[y],
+    'COGS': totalVarCostsByYear[y],
     'Gross Margin': grossMarginByYear[y],
     'Fixed Costs': totalFixedCostsByYear[y],
     'Op. Profit': opProfitByYear[y]
   })), {
     name: 'Total',
     'Revenues': totalRevenue,
-    'Var. Costs': totalVariableCosts,
+    'COGS': totalVariableCosts,
     'Gross Margin': grossMargin,
     'Fixed Costs': fixedCosts,
     'Op. Profit': operatingProfit
@@ -426,11 +464,11 @@ export default function App() {
     });
     rows.push(['Revenue Total', '', ...totalRevenueByYear.map(String), String(totalRevenue)]);
     
-    // Variable Costs
+    // COGS
     derivedVariableCostsStreams.forEach(stream => {
-      rows.push(['Variable Cost', stream.name, ...stream.amounts.map(a => String(a || 0)), String(getStreamTotal(stream))]);
+      rows.push(['COGS', stream.name, ...stream.amounts.map(a => String(a || 0)), String(getStreamTotal(stream))]);
     });
-    rows.push(['Variable Cost Total', '', ...totalVarCostsByYear.map(String), String(totalVariableCosts)]);
+    rows.push(['COGS Total', '', ...totalVarCostsByYear.map(String), String(totalVariableCosts)]);
     
     // Fixed Costs
     fixedCostsStreams.forEach(stream => {
@@ -472,14 +510,21 @@ export default function App() {
 
   const exportToXLSX = () => {
     const wb = XLSX.utils.book_new();
-
     const marketsToExport: Market[] = ['Portugal', 'UK', 'Aggregated'];
 
+    const getColLetter = (col: number) => String.fromCharCode(65 + col);
+    const getCellRef = (col: number, row: number) => `${getColLetter(col)}${row + 1}`;
+
     marketsToExport.forEach(market => {
+      let financials: any;
       let data: MarketData;
+
       if (market === 'Aggregated') {
         const pt = markets.Portugal;
         const uk = markets.UK;
+        const ptFin = { ...pt, ...calculateFinancials(pt) };
+        const ukFin = { ...uk, ...calculateFinancials(uk) };
+
         const aggregateStreams = (s1: FinancialStream[], s2: FinancialStream[]) => {
           const allNames = Array.from(new Set([...s1.map(s => s.name), ...s2.map(s => s.name)]));
           return allNames.map(name => {
@@ -491,72 +536,310 @@ export default function App() {
               name,
               amounts,
               isPermanent: st1?.isPermanent || st2?.isPermanent,
-              isCalculated: true
+              isCalculated: st1?.isCalculated || st2?.isCalculated
             };
           });
         };
-        data = {
-          platformMetricsStreams: aggregateStreams(pt.platformMetricsStreams, uk.platformMetricsStreams),
-          revenueStreams: aggregateStreams(pt.revenueStreams, uk.revenueStreams),
-          variableCostsStreams: aggregateStreams(pt.variableCostsStreams, uk.variableCostsStreams),
-          fixedCostsStreams: aggregateStreams(pt.fixedCostsStreams, uk.fixedCostsStreams),
-          chargeSubscription: pt.chargeSubscription.map((v, i) => v || uk.chargeSubscription[i]),
-          chargeBookingFees: pt.chargeBookingFees.map((v, i) => v || uk.chargeBookingFees[i]),
+
+        const totalRevenueByYear = years.map(y => ptFin.totalRevenueByYear[y] + ukFin.totalRevenueByYear[y]);
+        const totalVarCostsByYear = years.map(y => ptFin.totalVarCostsByYear[y] + ukFin.totalVarCostsByYear[y]);
+        const totalFixedCostsByYear = years.map(y => ptFin.totalFixedCostsByYear[y] + ukFin.totalFixedCostsByYear[y]);
+        const totalPlatformMetricsByYear = years.map(y => ptFin.totalPlatformMetricsByYear[y] + ukFin.totalPlatformMetricsByYear[y]);
+        const grossMarginByYear = years.map(y => ptFin.grossMarginByYear[y] + ukFin.grossMarginByYear[y]);
+        const opProfitByYear = years.map(y => ptFin.opProfitByYear[y] + ukFin.opProfitByYear[y]);
+
+        const totalRevenue = ptFin.totalRevenue + ukFin.totalRevenue;
+        const totalVariableCosts = ptFin.totalVariableCosts + ukFin.totalVariableCosts;
+        const fixedCosts = ptFin.fixedCosts + ukFin.fixedCosts;
+        const totalPlatformMetrics = ptFin.totalPlatformMetrics + ukFin.totalPlatformMetrics;
+        const grossMargin = ptFin.grossMargin + ukFin.grossMargin;
+        const operatingProfit = ptFin.operatingProfit + ukFin.operatingProfit;
+
+        const calculatedMarginPercent = totalRevenue > 0 ? (grossMargin / totalRevenue) * 100 : 0;
+        const calculatedOpProfitPercent = totalRevenue > 0 ? (operatingProfit / totalRevenue) * 100 : 0;
+        const grossMarginPercentByYear = years.map(y => totalRevenueByYear[y] > 0 ? (grossMarginByYear[y] / totalRevenueByYear[y]) * 100 : 0);
+        const opProfitPercentByYear = years.map(y => totalRevenueByYear[y] > 0 ? (opProfitByYear[y] / totalRevenueByYear[y]) * 100 : 0);
+
+        financials = {
+          platformMetricsStreams: aggregateStreams(ptFin.platformMetricsStreams, ukFin.platformMetricsStreams),
+          revenueStreams: aggregateStreams(ptFin.revenueStreams, ukFin.revenueStreams),
+          variableCostsStreams: aggregateStreams(ptFin.variableCostsStreams, ukFin.variableCostsStreams),
+          fixedCostsStreams: aggregateStreams(ptFin.fixedCostsStreams, ukFin.fixedCostsStreams),
+          derivedRevenueStreams: aggregateStreams(ptFin.derivedRevenueStreams, ukFin.derivedRevenueStreams),
+          derivedVariableCostsStreams: aggregateStreams(ptFin.derivedVariableCostsStreams, ukFin.derivedVariableCostsStreams),
+          chargeSubscription: ptFin.chargeSubscription.map((v, i) => v || ukFin.chargeSubscription[i]),
+          chargeBookingFees: ptFin.chargeBookingFees.map((v, i) => v || ukFin.chargeBookingFees[i]),
+          totalRevenueByYear,
+          totalVarCostsByYear,
+          totalFixedCostsByYear,
+          totalPlatformMetricsByYear,
+          grossMarginByYear,
+          grossMarginPercentByYear,
+          opProfitByYear,
+          opProfitPercentByYear,
+          totalRevenue,
+          totalVariableCosts,
+          fixedCosts,
+          totalPlatformMetrics,
+          grossMargin,
+          operatingProfit,
+          calculatedMarginPercent,
+          calculatedOpProfitPercent
         };
+        data = financials;
       } else {
         data = markets[market];
+        financials = { ...data, ...calculateFinancials(data) };
       }
 
-      const financials = calculateFinancials(data);
       const rows: any[][] = [];
+      let currentRow = 0;
 
       // Header
-      rows.push([`Market: ${market}`]);
-      rows.push([]);
-      rows.push(['Category', 'Stream Name', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']);
-
-      // Revenue Streams
-      financials.derivedRevenueStreams.forEach(stream => {
-        rows.push(['Revenue', stream.name, ...stream.amounts.map(a => Number(a) || 0), getStreamTotal(stream)]);
-      });
-      rows.push(['Revenue Total', '', ...financials.totalRevenueByYear, financials.totalRevenue]);
-
-      // Variable Costs
-      financials.derivedVariableCostsStreams.forEach(stream => {
-        rows.push(['Variable Cost', stream.name, ...stream.amounts.map(a => Number(a) || 0), getStreamTotal(stream)]);
-      });
-      rows.push(['Variable Cost Total', '', ...financials.totalVarCostsByYear, financials.totalVariableCosts]);
-
-      // Fixed Costs
-      data.fixedCostsStreams.forEach(stream => {
-        rows.push(['Fixed Cost', stream.name, ...stream.amounts.map(a => Number(a) || 0), getStreamTotal(stream)]);
-      });
-      rows.push(['Fixed Cost Total', '', ...financials.totalFixedCostsByYear, financials.fixedCosts]);
-
-      // Summary
-      rows.push([]);
-      rows.push(['Summary', 'Metric', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']);
-      rows.push(['Summary', 'Revenues', ...financials.totalRevenueByYear, financials.totalRevenue]);
-      rows.push(['Summary', 'Variable Costs', ...financials.totalVarCostsByYear, financials.totalVariableCosts]);
-      rows.push(['Summary', 'Gross Margin', ...financials.grossMarginByYear, financials.grossMargin]);
-      rows.push(['Summary', 'Gross Margin %', ...financials.grossMarginPercentByYear.map(v => `${v.toFixed(1)}%`), `${financials.calculatedMarginPercent.toFixed(1)}%`]);
-      rows.push(['Summary', 'Fixed Costs', ...financials.totalFixedCostsByYear, financials.fixedCosts]);
-      rows.push(['Summary', 'Operating Profit', ...financials.opProfitByYear, financials.operatingProfit]);
-      rows.push(['Summary', 'Operating Profit %', ...financials.opProfitPercentByYear.map(v => `${v.toFixed(1)}%`), `${financials.calculatedOpProfitPercent.toFixed(1)}%`]);
+      rows.push([`Market: ${market}`]); currentRow++;
+      rows.push([]); currentRow++;
+      rows.push(['Category', 'Stream Name', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']); currentRow++;
+      const headerRow = currentRow - 1;
 
       // Platform Metrics
-      rows.push([]);
-      rows.push(['Platform Metrics', 'Stream Name', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']);
-      data.platformMetricsStreams.forEach(stream => {
-        rows.push(['Platform Metric', stream.name, ...stream.amounts.map(a => Number(a) || 0), getStreamTotal(stream)]);
+      const metricRowMap: Record<string, number> = {};
+      financials.platformMetricsStreams.forEach((stream: FinancialStream) => {
+        metricRowMap[stream.name] = currentRow;
+        rows.push([
+          'Platform Metric', 
+          stream.name, 
+          ...stream.amounts.map(a => Number(a) || 0), 
+          { f: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
+        ]);
+        currentRow++;
       });
-      rows.push(['Platform Metric Total', '', ...financials.totalPlatformMetricsByYear, financials.totalPlatformMetrics]);
+      const metricsTotalRow = currentRow;
+      rows.push([
+        'Platform Metric Total', 
+        '', 
+        ...years.map(y => ({ f: `SUM(${getCellRef(2 + y, headerRow + 1)}:${getCellRef(2 + y, metricsTotalRow - 1)})` })),
+        { f: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
+      ]);
+      currentRow++;
+
+      rows.push([]); currentRow++;
 
       // Platform Settings
-      rows.push([]);
-      rows.push(['Platform Settings', 'Setting', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5']);
-      rows.push(['Platform Setting', 'Charge Subscription', ...data.chargeSubscription.map(v => v ? 'Yes' : 'No')]);
-      rows.push(['Platform Setting', 'Charge Booking Fees', ...data.chargeBookingFees.map(v => v ? 'Yes' : 'No')]);
+      rows.push(['Platform Settings', 'Setting', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5']); currentRow++;
+      const chargeSubRow = currentRow;
+      rows.push(['Platform Setting', 'Charge Subscription', ...financials.chargeSubscription.map((v: boolean) => v ? 1 : 0)]); currentRow++;
+      const chargeBookingRow = currentRow;
+      rows.push(['Platform Setting', 'Charge Booking Fees', ...financials.chargeBookingFees.map((v: boolean) => v ? 1 : 0)]); currentRow++;
+
+      rows.push([]); currentRow++;
+
+      // Revenue Streams
+      rows.push(['Category', 'Stream Name', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']); currentRow++;
+      const revenueStartRow = currentRow;
+      financials.derivedRevenueStreams.forEach((stream: FinancialStream) => {
+        const rowData: any[] = ['Revenue', stream.name];
+        if (stream.name === 'Monthly Subscriptions') {
+          const providersRow = metricRowMap['Number of providers in the platform'];
+          const subFeeRow = metricRowMap['Monthly Subscription fee'];
+          years.forEach(y => {
+            const col = 2 + y;
+            rowData.push({ f: `${getCellRef(col, providersRow)}*${getCellRef(col, subFeeRow)}*${getCellRef(col, chargeSubRow)}*12` });
+          });
+        } else if (stream.name === 'Booking Fees') {
+          const ownersRow = metricRowMap['Number of owners in the platform'];
+          const bookingsPerOwnerRow = metricRowMap['# of yearly bookings per pet owners'];
+          const avgPriceRow = metricRowMap['Avg price per booking'];
+          const commissionRow = metricRowMap['% of bookings commission'];
+          years.forEach(y => {
+            const col = 2 + y;
+            rowData.push({ f: `${getCellRef(col, ownersRow)}*${getCellRef(col, bookingsPerOwnerRow)}*${getCellRef(col, avgPriceRow)}*(${getCellRef(col, commissionRow)}/100)*${getCellRef(col, chargeBookingRow)}` });
+          });
+        } else {
+          rowData.push(...stream.amounts.map(a => Number(a) || 0));
+        }
+        rowData.push({ f: `SUM(C${currentRow + 1}:G${currentRow + 1})` });
+        rows.push(rowData);
+        currentRow++;
+      });
+      const revenueEndRow = currentRow - 1;
+      const revenueTotalRow = currentRow;
+      rows.push([
+        'Revenue Total', 
+        '', 
+        ...years.map(y => ({ f: `SUM(${getCellRef(2 + y, revenueStartRow)}:${getCellRef(2 + y, revenueEndRow)})` })),
+        { f: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
+      ]);
+      currentRow++;
+
+      rows.push([]); currentRow++;
+
+      // COGS
+      rows.push(['Category', 'Stream Name', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']); currentRow++;
+      const cogsStartRow = currentRow;
+      financials.derivedVariableCostsStreams.forEach((stream: FinancialStream) => {
+        const rowData: any[] = ['COGS', stream.name];
+        if (stream.name === 'Payment Processing') {
+          const providersRow = metricRowMap['Number of providers in the platform'];
+          const subFeeRow = metricRowMap['Monthly Subscription fee'];
+          const ownersRow = metricRowMap['Number of owners in the platform'];
+          const bookingsPerOwnerRow = metricRowMap['# of yearly bookings per pet owners'];
+          const avgPriceRow = metricRowMap['Avg price per booking'];
+
+          years.forEach(y => {
+            const col = 2 + y;
+            const p = getCellRef(col, providersRow);
+            const sf = getCellRef(col, subFeeRow);
+            const cs = getCellRef(col, chargeSubRow);
+            const o = getCellRef(col, ownersRow);
+            const bpo = getCellRef(col, bookingsPerOwnerRow);
+            const ap = getCellRef(col, avgPriceRow);
+            
+            const subVol = `(${p}*${sf}*${cs}*12)`;
+            const bookVol = `(${o}*${bpo}*${ap})`;
+            const subTrans = `(${p}*12*${cs})`;
+            const bookTrans = `(${o}*${bpo})`;
+            
+            rowData.push({ f: `((${subVol}+${bookVol})*0.029) + ((${subTrans}+${bookTrans})*0.30)` });
+          });
+        } else if (stream.name === 'Customer acquisition costs') {
+          const providersRow = metricRowMap['Number of providers in the platform'];
+          const ownersRow = metricRowMap['Number of owners in the platform'];
+          const unitCacProvidersRow = metricRowMap['Unit CAC - Providers'];
+          const unitCacOwnersRow = metricRowMap['Unit CAC - Owners'];
+          
+          years.forEach(y => {
+            const col = 2 + y;
+            const p = getCellRef(col, providersRow);
+            const o = getCellRef(col, ownersRow);
+            const ucp = getCellRef(col, unitCacProvidersRow);
+            const uco = getCellRef(col, unitCacOwnersRow);
+            
+            const prevP = y > 0 ? getCellRef(col - 1, providersRow) : "0";
+            const prevO = y > 0 ? getCellRef(col - 1, ownersRow) : "0";
+            
+            const newP = `MAX(0, ${p}-${prevP})`;
+            const newO = `MAX(0, ${o}-${prevO})`;
+            
+            rowData.push({ f: `(${newP}*${ucp}) + (${newO}*${uco})` });
+          });
+        } else if (stream.name === 'Customer Support') {
+          const providersRow = metricRowMap['Number of providers in the platform'];
+          const ownersRow = metricRowMap['Number of owners in the platform'];
+          const unitCsProvidersRow = metricRowMap['Unit Customer Support cost - Providers'];
+          const unitCsOwnersRow = metricRowMap['Unit Customer Support cost - Owners'];
+          
+          years.forEach(y => {
+            const col = 2 + y;
+            const p = getCellRef(col, providersRow);
+            const o = getCellRef(col, ownersRow);
+            const ucp = getCellRef(col, unitCsProvidersRow);
+            const uco = getCellRef(col, unitCsOwnersRow);
+            
+            rowData.push({ f: `(${p}*${ucp}) + (${o}*${uco})` });
+          });
+        } else {
+          rowData.push(...stream.amounts.map(a => Number(a) || 0));
+        }
+        rowData.push({ f: `SUM(C${currentRow + 1}:G${currentRow + 1})` });
+        rows.push(rowData);
+        currentRow++;
+      });
+      const cogsEndRow = currentRow - 1;
+      const cogsTotalRow = currentRow;
+      rows.push([
+        'COGS Total', 
+        '', 
+        ...years.map(y => ({ f: `SUM(${getCellRef(2 + y, cogsStartRow)}:${getCellRef(2 + y, cogsEndRow)})` })),
+        { f: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
+      ]);
+      currentRow++;
+
+      rows.push([]); currentRow++;
+
+      // Fixed Costs
+      rows.push(['Category', 'Stream Name', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']); currentRow++;
+      const fixedStartRow = currentRow;
+      financials.fixedCostsStreams.forEach((stream: FinancialStream) => {
+        rows.push([
+          'Fixed Cost', 
+          stream.name, 
+          ...stream.amounts.map(a => Number(a) || 0), 
+          { f: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
+        ]);
+        currentRow++;
+      });
+      const fixedEndRow = currentRow - 1;
+      const fixedTotalRow = currentRow;
+      rows.push([
+        'Fixed Cost Total', 
+        '', 
+        ...years.map(y => ({ f: `SUM(${getCellRef(2 + y, fixedStartRow)}:${getCellRef(2 + y, fixedEndRow)})` })),
+        { f: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
+      ]);
+      currentRow++;
+
+      rows.push([]); currentRow++;
+
+      // Summary
+      rows.push(['Summary', 'Metric', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']); currentRow++;
+      
+      // Revenues
+      rows.push([
+        'Summary', 
+        'Revenues', 
+        ...years.map(y => ({ f: getCellRef(2 + y, revenueTotalRow) })),
+        { f: getCellRef(7, revenueTotalRow) }
+      ]); currentRow++;
+      
+      // COGS
+      rows.push([
+        'Summary', 
+        'COGS', 
+        ...years.map(y => ({ f: getCellRef(2 + y, cogsTotalRow) })),
+        { f: getCellRef(7, cogsTotalRow) }
+      ]); currentRow++;
+
+      // Gross Margin
+      const gmRow = currentRow;
+      rows.push([
+        'Summary', 
+        'Gross Margin', 
+        ...years.map(y => ({ f: `${getCellRef(2 + y, gmRow - 2)}-${getCellRef(2 + y, gmRow - 1)}` })),
+        { f: `${getCellRef(7, gmRow - 2)}-${getCellRef(7, gmRow - 1)}` }
+      ]); currentRow++;
+
+      // Gross Margin %
+      rows.push([
+        'Summary', 
+        'Gross Margin %', 
+        ...years.map(y => ({ f: `IF(${getCellRef(2 + y, gmRow - 2)}>0, ${getCellRef(2 + y, gmRow)}/${getCellRef(2 + y, gmRow - 2)}, 0)` })),
+        { f: `IF(${getCellRef(7, gmRow - 2)}>0, ${getCellRef(7, gmRow)}/${getCellRef(7, gmRow - 2)}, 0)` }
+      ]); currentRow++;
+
+      // Fixed Costs
+      rows.push([
+        'Summary', 
+        'Fixed Costs', 
+        ...years.map(y => ({ f: getCellRef(2 + y, fixedTotalRow) })),
+        { f: getCellRef(7, fixedTotalRow) }
+      ]); currentRow++;
+
+      // Operating Profit
+      const opRow = currentRow;
+      rows.push([
+        'Summary', 
+        'Operating Profit', 
+        ...years.map(y => ({ f: `${getCellRef(2 + y, opRow - 2)}-${getCellRef(2 + y, opRow - 1)}` })),
+        { f: `${getCellRef(7, opRow - 2)}-${getCellRef(7, opRow - 1)}` }
+      ]); currentRow++;
+
+      // Operating Profit %
+      rows.push([
+        'Summary', 
+        'Operating Profit %', 
+        ...years.map(y => ({ f: `IF(${getCellRef(2 + y, gmRow - 2)}>0, ${getCellRef(2 + y, opRow)}/${getCellRef(2 + y, gmRow - 2)}, 0)` })),
+        { f: `IF(${getCellRef(7, gmRow - 2)}>0, ${getCellRef(7, opRow)}/${getCellRef(7, gmRow - 2)}, 0)` }
+      ]); currentRow++;
 
       const ws = XLSX.utils.aoa_to_sheet(rows);
       XLSX.utils.book_append_sheet(wb, ws, market);
@@ -804,7 +1087,7 @@ export default function App() {
                         <td className={`text-right py-2 px-2 font-bold bg-slate-50/50 font-mono ${totalRevenue >= 0 ? 'text-slate-900' : 'text-red-900'}`}>{formatCurrency(totalRevenue)}</td>
                       </tr>
                       <tr className="border-b border-slate-50">
-                        <td className="py-2 px-2 font-medium text-slate-700">Variable Costs</td>
+                        <td className="py-2 px-2 font-medium text-slate-700">COGS</td>
                         {years.map(y => (
                           <td key={y} className={`text-right py-2 px-2 font-mono ${totalVarCostsByYear[y] >= 0 ? 'text-slate-600' : 'text-red-600'}`}>{formatCurrency(totalVarCostsByYear[y])}</td>
                         ))}
@@ -863,7 +1146,7 @@ export default function App() {
               </div>
 
               {renderStreamSection('Revenue Streams', derivedRevenueStreams, 'Revenue', totalRevenue, totalRevenueByYear, 'revenueStreams')}
-              {renderStreamSection('Variable Costs', derivedVariableCostsStreams, 'Cost', totalVariableCosts, totalVarCostsByYear, 'variableCostsStreams')}
+              {renderStreamSection('COGS', derivedVariableCostsStreams, 'Cost', totalVariableCosts, totalVarCostsByYear, 'variableCostsStreams')}
               {renderStreamSection('Fixed Operating Costs', fixedCostsStreams, 'Fixed Cost', fixedCosts, totalFixedCostsByYear, 'fixedCostsStreams')}
             </div>
 
@@ -961,7 +1244,7 @@ export default function App() {
                       wrapperStyle={{ paddingLeft: '20px' }}
                       content={(props) => {
                         const { payload } = props;
-                        const order = ['Revenues', 'Var. Costs', 'Gross Margin', 'Fixed Costs', 'Op. Profit'];
+                        const order = ['Revenues', 'COGS', 'Gross Margin', 'Fixed Costs', 'Op. Profit'];
                         const sortedPayload = order.map(name => payload?.find((p: any) => p.value === name)).filter(Boolean);
                         
                         return (
@@ -979,8 +1262,8 @@ export default function App() {
                     <Bar dataKey="Revenues" fill="#3b82f6">
                       <LabelList dataKey="Revenues" content={renderCustomBarLabel} />
                     </Bar>
-                    <Bar dataKey="Var. Costs" fill="#f59e0b">
-                      <LabelList dataKey="Var. Costs" content={renderCustomBarLabel} />
+                    <Bar dataKey="COGS" fill="#f59e0b">
+                      <LabelList dataKey="COGS" content={renderCustomBarLabel} />
                     </Bar>
                     <Bar dataKey="Gross Margin" fill="#8b5cf6">
                       <LabelList dataKey="Gross Margin" content={renderCustomBarLabel} />
