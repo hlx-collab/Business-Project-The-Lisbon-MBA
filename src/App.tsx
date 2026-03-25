@@ -113,8 +113,8 @@ export default function App() {
         const subFeeStream = platformMetricsStreams.find(s => s.id === 'pm-5' || s.name === 'Monthly Subscription fee');
         
         const amounts = years.map(y => {
-          const providers = Number(providersStream?.amounts[y]) || 0;
-          const subFee = Number(subFeeStream?.amounts[y]) || 0;
+          const providers = Number(providersStream?.amounts?.[y]) || 0;
+          const subFee = Number(subFeeStream?.amounts?.[y]) || 0;
           const charge = chargeSubscription[y] ? 1 : 0;
           const total = providers * subFee * charge * 12;
           return total;
@@ -128,10 +128,10 @@ export default function App() {
         const commissionStream = platformMetricsStreams.find(s => s.id === 'pm-4' || s.name === '% of bookings commission');
         
         const amounts = years.map(y => {
-          const owners = Number(ownersStream?.amounts[y]) || 0;
-          const bookingsPerOwner = Number(bookingsPerOwnerStream?.amounts[y]) || 0;
-          const avgPrice = Number(avgPriceStream?.amounts[y]) || 0;
-          const commission = Number(commissionStream?.amounts[y]) || 0;
+          const owners = Number(ownersStream?.amounts?.[y]) || 0;
+          const bookingsPerOwner = Number(bookingsPerOwnerStream?.amounts?.[y]) || 0;
+          const avgPrice = Number(avgPriceStream?.amounts?.[y]) || 0;
+          const commission = Number(commissionStream?.amounts?.[y]) || 0;
           const charge = chargeBookingFees[y] ? 1 : 0;
           
           const total = owners * bookingsPerOwner * avgPrice * (commission / 100) * charge;
@@ -151,15 +151,15 @@ export default function App() {
         const avgPriceStream = platformMetricsStreams.find(s => s.id === 'pm-3' || s.name === 'Avg price per booking');
         
         const amounts = years.map(y => {
-          const providers = Number(providersStream?.amounts[y]) || 0;
-          const subFee = Number(subFeeStream?.amounts[y]) || 0;
+          const providers = Number(providersStream?.amounts?.[y]) || 0;
+          const subFee = Number(subFeeStream?.amounts?.[y]) || 0;
           const chargeSub = chargeSubscription[y] ? 1 : 0;
           const subTransactions = providers * 12 * chargeSub;
           const subVolume = subTransactions * subFee;
 
-          const owners = Number(ownersStream?.amounts[y]) || 0;
-          const bookingsPerOwner = Number(bookingsPerOwnerStream?.amounts[y]) || 0;
-          const avgPrice = Number(avgPriceStream?.amounts[y]) || 0;
+          const owners = Number(ownersStream?.amounts?.[y]) || 0;
+          const bookingsPerOwner = Number(bookingsPerOwnerStream?.amounts?.[y]) || 0;
+          const avgPrice = Number(avgPriceStream?.amounts?.[y]) || 0;
           
           const bookingTransactions = owners * bookingsPerOwner;
           const bookingVolume = bookingTransactions * avgPrice;
@@ -179,16 +179,16 @@ export default function App() {
         const unitCacOwnersStream = platformMetricsStreams.find(s => s.id === 'pm-cac-owners' || s.name === 'Unit CAC - Owners');
         
         const amounts = years.map(y => {
-          const currentProviders = Number(providersStream?.amounts[y]) || 0;
-          const currentOwners = Number(ownersStream?.amounts[y]) || 0;
-          const prevProviders = y > 0 ? (Number(providersStream?.amounts[y - 1]) || 0) : 0;
-          const prevOwners = y > 0 ? (Number(ownersStream?.amounts[y - 1]) || 0) : 0;
+          const currentProviders = Number(providersStream?.amounts?.[y]) || 0;
+          const currentOwners = Number(ownersStream?.amounts?.[y]) || 0;
+          const prevProviders = y > 0 ? (Number(providersStream?.amounts?.[y - 1]) || 0) : 0;
+          const prevOwners = y > 0 ? (Number(ownersStream?.amounts?.[y - 1]) || 0) : 0;
           
           const newProviders = Math.max(0, currentProviders - prevProviders);
           const newOwners = Math.max(0, currentOwners - prevOwners);
           
-          const unitCacProviders = Number(unitCacProvidersStream?.amounts[y]) || 0;
-          const unitCacOwners = Number(unitCacOwnersStream?.amounts[y]) || 0;
+          const unitCacProviders = Number(unitCacProvidersStream?.amounts?.[y]) || 0;
+          const unitCacOwners = Number(unitCacOwnersStream?.amounts?.[y]) || 0;
           
           return (newProviders * unitCacProviders) + (newOwners * unitCacOwners);
         });
@@ -201,10 +201,10 @@ export default function App() {
         const unitSupportOwnersStream = platformMetricsStreams.find(s => s.id === 'pm-cs-owners' || s.name === 'Unit Customer Support cost - Owners');
         
         const amounts = years.map(y => {
-          const providers = Number(providersStream?.amounts[y]) || 0;
-          const owners = Number(ownersStream?.amounts[y]) || 0;
-          const unitCostProviders = Number(unitSupportProvidersStream?.amounts[y]) || 0;
-          const unitCostOwners = Number(unitSupportOwnersStream?.amounts[y]) || 0;
+          const providers = Number(providersStream?.amounts?.[y]) || 0;
+          const owners = Number(ownersStream?.amounts?.[y]) || 0;
+          const unitCostProviders = Number(unitSupportProvidersStream?.amounts?.[y]) || 0;
+          const unitCostOwners = Number(unitSupportOwnersStream?.amounts?.[y]) || 0;
           
           return (providers * unitCostProviders) + (owners * unitCostOwners);
         });
@@ -294,12 +294,79 @@ export default function App() {
       const ptFin = { ...pt, ...calculateFinancials(pt) };
       const ukFin = { ...uk, ...calculateFinancials(uk) };
 
-      const aggregateStreams = (s1: FinancialStream[], s2: FinancialStream[]) => {
+      const aggregateStreams = (s1: FinancialStream[], s2: FinancialStream[], isPlatformMetrics = false) => {
         const allNames = Array.from(new Set([...s1.map(s => s.name), ...s2.map(s => s.name)]));
         return allNames.map(name => {
           const st1 = s1.find(s => s.name === name);
           const st2 = s2.find(s => s.name === name);
-          const amounts = years.map(y => (Number(st1?.amounts[y]) || 0) + (Number(st2?.amounts[y]) || 0));
+          
+          const amounts = years.map(y => {
+            const metricVal1 = Number(st1?.amounts?.[y]) || 0;
+            const metricVal2 = Number(st2?.amounts?.[y]) || 0;
+
+            if (isPlatformMetrics) {
+              const getMetric = (fin: any, metricName: string) => 
+                fin.platformMetricsStreams.find((s: any) => s.name === metricName);
+              
+              const getVal = (fin: any, metricName: string, year: number) => 
+                Number(getMetric(fin, metricName)?.amounts?.[year]) || 0;
+
+              let result = 0;
+              if (name === '% of bookings commission') {
+                const vol1 = getVal(ptFin, 'Number of owners in the platform', y) * 
+                             getVal(ptFin, '# of yearly bookings per pet owners', y) * 
+                             getVal(ptFin, 'Avg price per booking', y);
+                const vol2 = getVal(ukFin, 'Number of owners in the platform', y) * 
+                             getVal(ukFin, '# of yearly bookings per pet owners', y) * 
+                             getVal(ukFin, 'Avg price per booking', y);
+                const totalVol = vol1 + vol2;
+                result = totalVol > 0 ? (metricVal1 * vol1 + metricVal2 * vol2) / totalVol : 0;
+              } else if (name === 'Avg price per booking') {
+                const w1 = getVal(ptFin, 'Number of owners in the platform', y) * 
+                           getVal(ptFin, '# of yearly bookings per pet owners', y);
+                const w2 = getVal(ukFin, 'Number of owners in the platform', y) * 
+                           getVal(ukFin, '# of yearly bookings per pet owners', y);
+                const totalW = w1 + w2;
+                result = totalW > 0 ? (metricVal1 * w1 + metricVal2 * w2) / totalW : 0;
+              } else if (name === 'Monthly Subscription fee' || name === 'Unit Customer Support cost - Providers') {
+                const w1 = getVal(ptFin, 'Number of providers in the platform', y);
+                const w2 = getVal(ukFin, 'Number of providers in the platform', y);
+                const totalW = w1 + w2;
+                result = totalW > 0 ? (metricVal1 * w1 + metricVal2 * w2) / totalW : 0;
+              } else if (name === '# of yearly bookings per pet owners' || name === 'Unit Customer Support cost - Owners') {
+                const w1 = getVal(ptFin, 'Number of owners in the platform', y);
+                const w2 = getVal(ukFin, 'Number of owners in the platform', y);
+                const totalW = w1 + w2;
+                result = totalW > 0 ? (metricVal1 * w1 + metricVal2 * w2) / totalW : 0;
+              } else if (name === 'Unit CAC - Providers') {
+                const getNew = (fin: any, year: number) => {
+                  const curr = getVal(fin, 'Number of providers in the platform', year);
+                  const prev = year > 0 ? getVal(fin, 'Number of providers in the platform', year - 1) : 0;
+                  return Math.max(0, curr - prev);
+                };
+                const w1 = getNew(ptFin, y);
+                const w2 = getNew(ukFin, y);
+                const totalW = w1 + w2;
+                result = totalW > 0 ? (metricVal1 * w1 + metricVal2 * w2) / totalW : 0;
+              } else if (name === 'Unit CAC - Owners') {
+                const getNew = (fin: any, year: number) => {
+                  const curr = getVal(fin, 'Number of owners in the platform', year);
+                  const prev = year > 0 ? getVal(fin, 'Number of owners in the platform', year - 1) : 0;
+                  return Math.max(0, curr - prev);
+                };
+                const w1 = getNew(ptFin, y);
+                const w2 = getNew(ukFin, y);
+                const totalW = w1 + w2;
+                result = totalW > 0 ? (metricVal1 * w1 + metricVal2 * w2) / totalW : 0;
+              } else {
+                result = metricVal1 + metricVal2;
+              }
+              return Math.round(result);
+            }
+
+            return metricVal1 + metricVal2;
+          });
+
           return {
             id: `agg-${name}`,
             name,
@@ -330,7 +397,7 @@ export default function App() {
       const opProfitPercentByYear = years.map(y => totalRevenueByYear[y] > 0 ? (opProfitByYear[y] / totalRevenueByYear[y]) * 100 : 0);
 
       return {
-        platformMetricsStreams: aggregateStreams(ptFin.platformMetricsStreams, ukFin.platformMetricsStreams),
+        platformMetricsStreams: aggregateStreams(ptFin.platformMetricsStreams, ukFin.platformMetricsStreams, true),
         revenueStreams: aggregateStreams(ptFin.revenueStreams, ukFin.revenueStreams),
         variableCostsStreams: aggregateStreams(ptFin.variableCostsStreams, ukFin.variableCostsStreams),
         fixedCostsStreams: aggregateStreams(ptFin.fixedCostsStreams, ukFin.fixedCostsStreams),
@@ -515,83 +582,19 @@ export default function App() {
     const getColLetter = (col: number) => String.fromCharCode(65 + col);
     const getCellRef = (col: number, row: number) => `${getColLetter(col)}${row + 1}`;
 
+    // Get union of all streams to ensure consistent row structure across sheets
+    const ptFin = { ...markets.Portugal, ...calculateFinancials(markets.Portugal) };
+    const ukFin = { ...markets.UK, ...calculateFinancials(markets.UK) };
+
+    const getUnion = (s1: FinancialStream[], s2: FinancialStream[]) => 
+      Array.from(new Set([...s1.map(s => s.name), ...s2.map(s => s.name)]));
+
+    const platformUnion = getUnion(ptFin.platformMetricsStreams, ukFin.platformMetricsStreams);
+    const revenueUnion = getUnion(ptFin.derivedRevenueStreams, ukFin.derivedRevenueStreams);
+    const cogsUnion = getUnion(ptFin.derivedVariableCostsStreams, ukFin.derivedVariableCostsStreams);
+    const fixedUnion = getUnion(ptFin.fixedCostsStreams, ukFin.fixedCostsStreams);
+
     marketsToExport.forEach(market => {
-      let financials: any;
-      let data: MarketData;
-
-      if (market === 'Aggregated') {
-        const pt = markets.Portugal;
-        const uk = markets.UK;
-        const ptFin = { ...pt, ...calculateFinancials(pt) };
-        const ukFin = { ...uk, ...calculateFinancials(uk) };
-
-        const aggregateStreams = (s1: FinancialStream[], s2: FinancialStream[]) => {
-          const allNames = Array.from(new Set([...s1.map(s => s.name), ...s2.map(s => s.name)]));
-          return allNames.map(name => {
-            const st1 = s1.find(s => s.name === name);
-            const st2 = s2.find(s => s.name === name);
-            const amounts = years.map(y => (Number(st1?.amounts[y]) || 0) + (Number(st2?.amounts[y]) || 0));
-            return {
-              id: `agg-${name}`,
-              name,
-              amounts,
-              isPermanent: st1?.isPermanent || st2?.isPermanent,
-              isCalculated: st1?.isCalculated || st2?.isCalculated
-            };
-          });
-        };
-
-        const totalRevenueByYear = years.map(y => ptFin.totalRevenueByYear[y] + ukFin.totalRevenueByYear[y]);
-        const totalVarCostsByYear = years.map(y => ptFin.totalVarCostsByYear[y] + ukFin.totalVarCostsByYear[y]);
-        const totalFixedCostsByYear = years.map(y => ptFin.totalFixedCostsByYear[y] + ukFin.totalFixedCostsByYear[y]);
-        const totalPlatformMetricsByYear = years.map(y => ptFin.totalPlatformMetricsByYear[y] + ukFin.totalPlatformMetricsByYear[y]);
-        const grossMarginByYear = years.map(y => ptFin.grossMarginByYear[y] + ukFin.grossMarginByYear[y]);
-        const opProfitByYear = years.map(y => ptFin.opProfitByYear[y] + ukFin.opProfitByYear[y]);
-
-        const totalRevenue = ptFin.totalRevenue + ukFin.totalRevenue;
-        const totalVariableCosts = ptFin.totalVariableCosts + ukFin.totalVariableCosts;
-        const fixedCosts = ptFin.fixedCosts + ukFin.fixedCosts;
-        const totalPlatformMetrics = ptFin.totalPlatformMetrics + ukFin.totalPlatformMetrics;
-        const grossMargin = ptFin.grossMargin + ukFin.grossMargin;
-        const operatingProfit = ptFin.operatingProfit + ukFin.operatingProfit;
-
-        const calculatedMarginPercent = totalRevenue > 0 ? (grossMargin / totalRevenue) * 100 : 0;
-        const calculatedOpProfitPercent = totalRevenue > 0 ? (operatingProfit / totalRevenue) * 100 : 0;
-        const grossMarginPercentByYear = years.map(y => totalRevenueByYear[y] > 0 ? (grossMarginByYear[y] / totalRevenueByYear[y]) * 100 : 0);
-        const opProfitPercentByYear = years.map(y => totalRevenueByYear[y] > 0 ? (opProfitByYear[y] / totalRevenueByYear[y]) * 100 : 0);
-
-        financials = {
-          platformMetricsStreams: aggregateStreams(ptFin.platformMetricsStreams, ukFin.platformMetricsStreams),
-          revenueStreams: aggregateStreams(ptFin.revenueStreams, ukFin.revenueStreams),
-          variableCostsStreams: aggregateStreams(ptFin.variableCostsStreams, ukFin.variableCostsStreams),
-          fixedCostsStreams: aggregateStreams(ptFin.fixedCostsStreams, ukFin.fixedCostsStreams),
-          derivedRevenueStreams: aggregateStreams(ptFin.derivedRevenueStreams, ukFin.derivedRevenueStreams),
-          derivedVariableCostsStreams: aggregateStreams(ptFin.derivedVariableCostsStreams, ukFin.derivedVariableCostsStreams),
-          chargeSubscription: ptFin.chargeSubscription.map((v, i) => v || ukFin.chargeSubscription[i]),
-          chargeBookingFees: ptFin.chargeBookingFees.map((v, i) => v || ukFin.chargeBookingFees[i]),
-          totalRevenueByYear,
-          totalVarCostsByYear,
-          totalFixedCostsByYear,
-          totalPlatformMetricsByYear,
-          grossMarginByYear,
-          grossMarginPercentByYear,
-          opProfitByYear,
-          opProfitPercentByYear,
-          totalRevenue,
-          totalVariableCosts,
-          fixedCosts,
-          totalPlatformMetrics,
-          grossMargin,
-          operatingProfit,
-          calculatedMarginPercent,
-          calculatedOpProfitPercent
-        };
-        data = financials;
-      } else {
-        data = markets[market];
-        financials = { ...data, ...calculateFinancials(data) };
-      }
-
       const rows: any[][] = [];
       let currentRow = 0;
 
@@ -601,61 +604,191 @@ export default function App() {
       rows.push(['Category', 'Stream Name', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']); currentRow++;
       const headerRow = currentRow - 1;
 
+      const getStreamValue = (marketName: Market, category: string, streamName: string, yearIdx: number) => {
+        const mData = marketName === 'Portugal' ? ptFin : ukFin;
+        let streams: FinancialStream[] = [];
+        if (category === 'Platform Metric') streams = mData.platformMetricsStreams;
+        if (category === 'Revenue') streams = mData.derivedRevenueStreams;
+        if (category === 'COGS') streams = mData.derivedVariableCostsStreams;
+        if (category === 'Fixed Cost') streams = mData.fixedCostsStreams;
+        
+        const stream = streams.find(s => s.name === streamName);
+        return Number(stream?.amounts?.[yearIdx]) || 0;
+      };
+
       // Platform Metrics
       const metricRowMap: Record<string, number> = {};
-      financials.platformMetricsStreams.forEach((stream: FinancialStream) => {
-        metricRowMap[stream.name] = currentRow;
-        rows.push([
-          'Platform Metric', 
-          stream.name, 
-          ...stream.amounts.map(a => Number(a) || 0), 
-          { f: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
-        ]);
+      let tempRow = currentRow;
+      platformUnion.forEach(name => {
+        metricRowMap[name] = tempRow;
+        tempRow++;
+      });
+
+      platformUnion.forEach(name => {
+        const rowData: any[] = ['Platform Metric', name];
+        years.forEach(y => {
+          if (market === 'Aggregated') {
+            const weightedMetrics = [
+              '% of bookings commission',
+              'Avg price per booking',
+              'Monthly Subscription fee',
+              '# of yearly bookings per pet owners',
+              'Unit CAC - Providers',
+              'Unit CAC - Owners',
+              'Unit Customer Support cost - Providers',
+              'Unit Customer Support cost - Owners'
+            ];
+
+            if (weightedMetrics.includes(name)) {
+              const col = getColLetter(2 + y);
+              const row = currentRow + 1;
+              const vPt = `'Portugal'!${col}${row}`;
+              const vUk = `'UK'!${col}${row}`;
+              let wPt = "";
+              let wUk = "";
+
+              if (name === '% of bookings commission') {
+                const oRow = metricRowMap['Number of owners in the platform'];
+                const bRow = metricRowMap['# of yearly bookings per pet owners'];
+                const aRow = metricRowMap['Avg price per booking'];
+                if (oRow !== undefined && bRow !== undefined && aRow !== undefined) {
+                  wPt = `'Portugal'!${col}${oRow+1}*'Portugal'!${col}${bRow+1}*'Portugal'!${col}${aRow+1}`;
+                  wUk = `'UK'!${col}${oRow+1}*'UK'!${col}${bRow+1}*'UK'!${col}${aRow+1}`;
+                } else {
+                  wPt = "0";
+                  wUk = "0";
+                }
+              } else if (name === 'Avg price per booking') {
+                const oRow = metricRowMap['Number of owners in the platform'];
+                const bRow = metricRowMap['# of yearly bookings per pet owners'];
+                if (oRow !== undefined && bRow !== undefined) {
+                  wPt = `'Portugal'!${col}${oRow+1}*'Portugal'!${col}${bRow+1}`;
+                  wUk = `'UK'!${col}${oRow+1}*'UK'!${col}${bRow+1}`;
+                } else {
+                  wPt = "0";
+                  wUk = "0";
+                }
+              } else if (name === 'Monthly Subscription fee' || name === 'Unit Customer Support cost - Providers') {
+                const wRow = metricRowMap['Number of providers in the platform'];
+                if (wRow !== undefined) {
+                  wPt = `'Portugal'!${col}${wRow+1}`;
+                  wUk = `'UK'!${col}${wRow+1}`;
+                } else {
+                  wPt = "0";
+                  wUk = "0";
+                }
+              } else if (name === '# of yearly bookings per pet owners' || name === 'Unit Customer Support cost - Owners') {
+                const wRow = metricRowMap['Number of owners in the platform'];
+                if (wRow !== undefined) {
+                  wPt = `'Portugal'!${col}${wRow+1}`;
+                  wUk = `'UK'!${col}${wRow+1}`;
+                } else {
+                  wPt = "0";
+                  wUk = "0";
+                }
+              } else if (name === 'Unit CAC - Providers') {
+                const wRow = metricRowMap['Number of providers in the platform'];
+                if (wRow !== undefined) {
+                  const pPt = `'Portugal'!${col}${wRow+1}`;
+                  const pUk = `'UK'!${col}${wRow+1}`;
+                  const prevPPt = y > 0 ? `'Portugal'!${getColLetter(1 + y)}${wRow+1}` : "0";
+                  const prevPUk = y > 0 ? `'UK'!${getColLetter(1 + y)}${wRow+1}` : "0";
+                  wPt = `MAX(0, ${pPt}-${prevPPt})`;
+                  wUk = `MAX(0, ${pUk}-${prevPUk})`;
+                } else {
+                  wPt = "0";
+                  wUk = "0";
+                }
+              } else if (name === 'Unit CAC - Owners') {
+                const wRow = metricRowMap['Number of owners in the platform'];
+                if (wRow !== undefined) {
+                  const pPt = `'Portugal'!${col}${wRow+1}`;
+                  const pUk = `'UK'!${col}${wRow+1}`;
+                  const prevPPt = y > 0 ? `'Portugal'!${getColLetter(1 + y)}${wRow+1}` : "0";
+                  const prevPUk = y > 0 ? `'UK'!${getColLetter(1 + y)}${wRow+1}` : "0";
+                  wPt = `MAX(0, ${pPt}-${prevPPt})`;
+                  wUk = `MAX(0, ${pUk}-${prevPUk})`;
+                } else {
+                  wPt = "0";
+                  wUk = "0";
+                }
+              }
+
+              rowData.push({ f: `IF((${wPt}+${wUk})>0, (${vPt}*${wPt} + ${vUk}*${wUk})/(${wPt}+${wUk}), 0)` });
+            } else {
+              rowData.push({ f: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` });
+            }
+          } else {
+            const val = getStreamValue(market as Market, 'Platform Metric', name, y);
+            if (name === '% of bookings commission') {
+              rowData.push(val / 100);
+            } else {
+              rowData.push(val);
+            }
+          }
+        });
+        // No total for platform metrics
+        rows.push(rowData);
         currentRow++;
       });
-      const metricsTotalRow = currentRow;
-      rows.push([
-        'Platform Metric Total', 
-        '', 
-        ...years.map(y => ({ f: `SUM(${getCellRef(2 + y, headerRow + 1)}:${getCellRef(2 + y, metricsTotalRow - 1)})` })),
-        { f: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
-      ]);
-      currentRow++;
 
+      const providersRow = metricRowMap['Number of providers in the platform'];
+      const subFeeRow = metricRowMap['Monthly Subscription fee'];
+      const ownersRow = metricRowMap['Number of owners in the platform'];
+      const bookingsPerOwnerRow = metricRowMap['# of yearly bookings per pet owners'];
+      const avgPriceRow = metricRowMap['Avg price per booking'];
+
+      // No total row for platform metrics
       rows.push([]); currentRow++;
 
       // Platform Settings
       rows.push(['Platform Settings', 'Setting', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5']); currentRow++;
       const chargeSubRow = currentRow;
-      rows.push(['Platform Setting', 'Charge Subscription', ...financials.chargeSubscription.map((v: boolean) => v ? 1 : 0)]); currentRow++;
+      const ptSub = markets.Portugal.chargeSubscription;
+      const ukSub = markets.UK.chargeSubscription;
+      rows.push(['Platform Setting', 'Charge Subscription', ...years.map(y => {
+        if (market === 'Aggregated') return { f: `MAX('Portugal'!${getCellRef(2 + y, currentRow)}, 'UK'!${getCellRef(2 + y, currentRow)})` };
+        return (market === 'Portugal' ? ptSub[y] : ukSub[y]) ? 1 : 0;
+      })]); currentRow++;
+      
       const chargeBookingRow = currentRow;
-      rows.push(['Platform Setting', 'Charge Booking Fees', ...financials.chargeBookingFees.map((v: boolean) => v ? 1 : 0)]); currentRow++;
+      const ptBook = markets.Portugal.chargeBookingFees;
+      const ukBook = markets.UK.chargeBookingFees;
+      rows.push(['Platform Setting', 'Charge Booking Fees', ...years.map(y => {
+        if (market === 'Aggregated') return { f: `MAX('Portugal'!${getCellRef(2 + y, currentRow)}, 'UK'!${getCellRef(2 + y, currentRow)})` };
+        return (market === 'Portugal' ? ptBook[y] : ukBook[y]) ? 1 : 0;
+      })]); currentRow++;
 
       rows.push([]); currentRow++;
+
+      // Calculate row indices for Payment Processing Breakdown (which will be at the end)
+      const revenueRowsCount = revenueUnion.length + 3;
+      const cogsRowsCount = cogsUnion.length + 3;
+      const fixedRowsCount = fixedUnion.length + 3;
+      const summaryRowsCount = 9; // 8 summary rows + 1 empty row
+      
+      const breakdownStartRow = currentRow + revenueRowsCount + cogsRowsCount + fixedRowsCount + summaryRowsCount;
+      const feePctRow = breakdownStartRow + 1;
+      const feeFixedRow = breakdownStartRow + 2;
+      const subVolRow = breakdownStartRow + 3;
+      const bookVolRow = breakdownStartRow + 4;
+      const subTransRow = breakdownStartRow + 5;
+      const bookTransRow = breakdownStartRow + 6;
 
       // Revenue Streams
       rows.push(['Category', 'Stream Name', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']); currentRow++;
       const revenueStartRow = currentRow;
-      financials.derivedRevenueStreams.forEach((stream: FinancialStream) => {
-        const rowData: any[] = ['Revenue', stream.name];
-        if (stream.name === 'Monthly Subscriptions') {
-          const providersRow = metricRowMap['Number of providers in the platform'];
-          const subFeeRow = metricRowMap['Monthly Subscription fee'];
-          years.forEach(y => {
-            const col = 2 + y;
-            rowData.push({ f: `${getCellRef(col, providersRow)}*${getCellRef(col, subFeeRow)}*${getCellRef(col, chargeSubRow)}*12` });
-          });
-        } else if (stream.name === 'Booking Fees') {
-          const ownersRow = metricRowMap['Number of owners in the platform'];
-          const bookingsPerOwnerRow = metricRowMap['# of yearly bookings per pet owners'];
-          const avgPriceRow = metricRowMap['Avg price per booking'];
+      revenueUnion.forEach(name => {
+        const rowData: any[] = ['Revenue', name];
+        if (market === 'Aggregated') {
+          years.forEach(y => rowData.push({ f: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }));
+        } else if (name === 'Monthly Subscriptions') {
+          years.forEach(y => rowData.push({ f: `${getCellRef(2 + y, providersRow)}*${getCellRef(2 + y, subFeeRow)}*${getCellRef(2 + y, chargeSubRow)}*12` }));
+        } else if (name === 'Booking Fees') {
           const commissionRow = metricRowMap['% of bookings commission'];
-          years.forEach(y => {
-            const col = 2 + y;
-            rowData.push({ f: `${getCellRef(col, ownersRow)}*${getCellRef(col, bookingsPerOwnerRow)}*${getCellRef(col, avgPriceRow)}*(${getCellRef(col, commissionRow)}/100)*${getCellRef(col, chargeBookingRow)}` });
-          });
+          years.forEach(y => rowData.push({ f: `${getCellRef(2 + y, ownersRow)}*${getCellRef(2 + y, bookingsPerOwnerRow)}*${getCellRef(2 + y, avgPriceRow)}*${getCellRef(2 + y, commissionRow)}*${getCellRef(2 + y, chargeBookingRow)}` }));
         } else {
-          rowData.push(...stream.amounts.map(a => Number(a) || 0));
+          years.forEach(y => rowData.push(getStreamValue(market as Market, 'Revenue', name, y)));
         }
         rowData.push({ f: `SUM(C${currentRow + 1}:G${currentRow + 1})` });
         rows.push(rowData);
@@ -676,69 +809,45 @@ export default function App() {
       // COGS
       rows.push(['Category', 'Stream Name', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']); currentRow++;
       const cogsStartRow = currentRow;
-      financials.derivedVariableCostsStreams.forEach((stream: FinancialStream) => {
-        const rowData: any[] = ['COGS', stream.name];
-        if (stream.name === 'Payment Processing') {
-          const providersRow = metricRowMap['Number of providers in the platform'];
-          const subFeeRow = metricRowMap['Monthly Subscription fee'];
-          const ownersRow = metricRowMap['Number of owners in the platform'];
-          const bookingsPerOwnerRow = metricRowMap['# of yearly bookings per pet owners'];
-          const avgPriceRow = metricRowMap['Avg price per booking'];
-
+      cogsUnion.forEach(name => {
+        const rowData: any[] = ['COGS', name];
+        if (market === 'Aggregated') {
+          years.forEach(y => rowData.push({ f: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }));
+        } else if (name === 'Payment Processing') {
           years.forEach(y => {
             const col = 2 + y;
-            const p = getCellRef(col, providersRow);
-            const sf = getCellRef(col, subFeeRow);
-            const cs = getCellRef(col, chargeSubRow);
-            const o = getCellRef(col, ownersRow);
-            const bpo = getCellRef(col, bookingsPerOwnerRow);
-            const ap = getCellRef(col, avgPriceRow);
-            
-            const subVol = `(${p}*${sf}*${cs}*12)`;
-            const bookVol = `(${o}*${bpo}*${ap})`;
-            const subTrans = `(${p}*12*${cs})`;
-            const bookTrans = `(${o}*${bpo})`;
-            
-            rowData.push({ f: `((${subVol}+${bookVol})*0.029) + ((${subTrans}+${bookTrans})*0.30)` });
+            const vol = `(${getCellRef(col, subVolRow)}+${getCellRef(col, bookVolRow)})`;
+            const trans = `(${getCellRef(col, subTransRow)}+${getCellRef(col, bookTransRow)})`;
+            rowData.push({ f: `(${vol}*${getCellRef(col, feePctRow)}) + (${trans}*${getCellRef(col, feeFixedRow)})` });
           });
-        } else if (stream.name === 'Customer acquisition costs') {
-          const providersRow = metricRowMap['Number of providers in the platform'];
-          const ownersRow = metricRowMap['Number of owners in the platform'];
+        } else if (name === 'Customer acquisition costs') {
           const unitCacProvidersRow = metricRowMap['Unit CAC - Providers'];
           const unitCacOwnersRow = metricRowMap['Unit CAC - Owners'];
-          
           years.forEach(y => {
             const col = 2 + y;
             const p = getCellRef(col, providersRow);
             const o = getCellRef(col, ownersRow);
             const ucp = getCellRef(col, unitCacProvidersRow);
             const uco = getCellRef(col, unitCacOwnersRow);
-            
             const prevP = y > 0 ? getCellRef(col - 1, providersRow) : "0";
             const prevO = y > 0 ? getCellRef(col - 1, ownersRow) : "0";
-            
             const newP = `MAX(0, ${p}-${prevP})`;
             const newO = `MAX(0, ${o}-${prevO})`;
-            
             rowData.push({ f: `(${newP}*${ucp}) + (${newO}*${uco})` });
           });
-        } else if (stream.name === 'Customer Support') {
-          const providersRow = metricRowMap['Number of providers in the platform'];
-          const ownersRow = metricRowMap['Number of owners in the platform'];
+        } else if (name === 'Customer Support') {
           const unitCsProvidersRow = metricRowMap['Unit Customer Support cost - Providers'];
           const unitCsOwnersRow = metricRowMap['Unit Customer Support cost - Owners'];
-          
           years.forEach(y => {
             const col = 2 + y;
             const p = getCellRef(col, providersRow);
             const o = getCellRef(col, ownersRow);
             const ucp = getCellRef(col, unitCsProvidersRow);
             const uco = getCellRef(col, unitCsOwnersRow);
-            
             rowData.push({ f: `(${p}*${ucp}) + (${o}*${uco})` });
           });
         } else {
-          rowData.push(...stream.amounts.map(a => Number(a) || 0));
+          years.forEach(y => rowData.push(getStreamValue(market as Market, 'COGS', name, y)));
         }
         rowData.push({ f: `SUM(C${currentRow + 1}:G${currentRow + 1})` });
         rows.push(rowData);
@@ -759,13 +868,17 @@ export default function App() {
       // Fixed Costs
       rows.push(['Category', 'Stream Name', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']); currentRow++;
       const fixedStartRow = currentRow;
-      financials.fixedCostsStreams.forEach((stream: FinancialStream) => {
-        rows.push([
-          'Fixed Cost', 
-          stream.name, 
-          ...stream.amounts.map(a => Number(a) || 0), 
-          { f: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
-        ]);
+      fixedUnion.forEach(name => {
+        const rowData: any[] = ['Fixed Cost', name];
+        years.forEach(y => {
+          if (market === 'Aggregated') {
+            rowData.push({ f: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` });
+          } else {
+            rowData.push(getStreamValue(market as Market, 'Fixed Cost', name, y));
+          }
+        });
+        rowData.push({ f: `SUM(C${currentRow + 1}:G${currentRow + 1})` });
+        rows.push(rowData);
         currentRow++;
       });
       const fixedEndRow = currentRow - 1;
@@ -829,8 +942,8 @@ export default function App() {
       rows.push([
         'Summary', 
         'Operating Profit', 
-        ...years.map(y => ({ f: `${getCellRef(2 + y, opRow - 2)}-${getCellRef(2 + y, opRow - 1)}` })),
-        { f: `${getCellRef(7, opRow - 2)}-${getCellRef(7, opRow - 1)}` }
+        ...years.map(y => ({ f: `${getCellRef(2 + y, opRow - 3)}-${getCellRef(2 + y, opRow - 1)}` })),
+        { f: `${getCellRef(7, opRow - 3)}-${getCellRef(7, opRow - 1)}` }
       ]); currentRow++;
 
       // Operating Profit %
@@ -841,7 +954,82 @@ export default function App() {
         { f: `IF(${getCellRef(7, gmRow - 2)}>0, ${getCellRef(7, opRow)}/${getCellRef(7, gmRow - 2)}, 0)` }
       ]); currentRow++;
 
+      rows.push([]); currentRow++;
+
+      // Payment Processing Breakdown (Helper Section) - Moved to end
+      rows.push(['Payment Processing Breakdown', 'Metric', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5']); currentRow++;
+
+      // Fee %
+      rows.push(['Breakdown', 'Payment Fee %', ...years.map(() => 0.029)]); currentRow++;
+      
+      // Fee per Transaction
+      rows.push(['Breakdown', 'Payment Fee per Transaction', ...years.map(() => 0.30)]); currentRow++;
+
+      // The following rows match the pre-calculated subVolRow, bookVolRow, etc.
+      if (market === 'Aggregated') {
+        rows.push(['Breakdown', 'Subscription Volume', ...years.map(y => ({ f: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }))]);
+      } else {
+        rows.push(['Breakdown', 'Subscription Volume', ...years.map(y => ({ f: `${getCellRef(2 + y, providersRow)}*${getCellRef(2 + y, subFeeRow)}*${getCellRef(2 + y, chargeSubRow)}*12` }))]);
+      }
+      currentRow++;
+
+      if (market === 'Aggregated') {
+        rows.push(['Breakdown', 'Booking Volume', ...years.map(y => ({ f: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }))]);
+      } else {
+        rows.push(['Breakdown', 'Booking Volume', ...years.map(y => ({ f: `${getCellRef(2 + y, ownersRow)}*${getCellRef(2 + y, bookingsPerOwnerRow)}*${getCellRef(2 + y, avgPriceRow)}` }))]);
+      }
+      currentRow++;
+
+      if (market === 'Aggregated') {
+        rows.push(['Breakdown', 'Subscription Transactions', ...years.map(y => ({ f: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }))]);
+      } else {
+        rows.push(['Breakdown', 'Subscription Transactions', ...years.map(y => ({ f: `${getCellRef(2 + y, providersRow)}*12*${getCellRef(2 + y, chargeSubRow)}` }))]);
+      }
+      currentRow++;
+
+      if (market === 'Aggregated') {
+        rows.push(['Breakdown', 'Booking Transactions', ...years.map(y => ({ f: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }))]);
+      } else {
+        rows.push(['Breakdown', 'Booking Transactions', ...years.map(y => ({ f: `${getCellRef(2 + y, ownersRow)}*${getCellRef(2 + y, bookingsPerOwnerRow)}` }))]);
+      }
+      currentRow++;
+
       const ws = XLSX.utils.aoa_to_sheet(rows);
+
+      // Apply formatting
+      const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
+      for (let R = range.s.r; R <= range.e.r; ++R) {
+        const firstCell = ws[XLSX.utils.encode_cell({ r: R, c: 0 })];
+        const secondCell = ws[XLSX.utils.encode_cell({ r: R, c: 1 })];
+        const category = firstCell?.v;
+        const name = secondCell?.v;
+
+        // Check if this row should be formatted as percentage
+        const isPercentage = 
+          name === '% of bookings commission' || 
+          name === 'Gross Margin %' || 
+          name === 'Operating Profit %' || 
+          name === 'Payment Fee %';
+        
+        const isPlatformMetric = category === 'Platform Metric';
+
+        if (isPercentage) {
+          for (let C = 2; C <= range.e.c; ++C) {
+            const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
+            if (cell && (cell.t === 'n' || cell.f)) {
+              cell.z = '0.0%';
+            }
+          }
+        } else if (isPlatformMetric) {
+          for (let C = 2; C <= range.e.c; ++C) {
+            const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
+            if (cell && (cell.t === 'n' || cell.f)) {
+              cell.z = '0';
+            }
+          }
+        }
+      }
+
       XLSX.utils.book_append_sheet(wb, ws, market);
     });
 
@@ -879,9 +1067,13 @@ export default function App() {
     total: number,
     totalsByYear: number[],
     stateKey: keyof MarketData,
-    formatType: 'currency' | 'number' = 'currency'
+    formatType: 'currency' | 'number' = 'currency',
+    showTotal: boolean = true
   ) => {
-    const formatValue = (val: number) => formatType === 'currency' ? formatCurrency(val) : new Intl.NumberFormat('en-US').format(val);
+    const formatValue = (val: number) => {
+      if (formatType === 'currency') return formatCurrency(val);
+      return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(val);
+    };
     const isReadOnly = activeMarket === 'Aggregated';
     
     return (
@@ -904,13 +1096,13 @@ export default function App() {
       
       <div className="space-y-6">
         {/* Header Row for Years */}
-        <div className="flex items-center space-x-3 px-1">
+        <div className="flex flex-col sm:flex-row sm:items-center space-y-3 sm:space-y-0 sm:space-x-3 p-3 border border-transparent">
           <div className="flex-1"></div>
-          <div className="grid grid-cols-6 gap-2 w-full max-w-[400px]">
+          <div className={`grid ${showTotal ? 'grid-cols-6' : 'grid-cols-5'} gap-2 w-full sm:max-w-[550px]`}>
             {years.map(y => (
               <div key={y} className="text-center text-xs font-medium text-slate-500">Y{y+1}</div>
             ))}
-            <div className="text-right text-xs font-medium text-slate-500">Total</div>
+            {showTotal && <div className="text-right text-xs font-medium text-slate-500">Total</div>}
           </div>
         </div>
 
@@ -918,8 +1110,15 @@ export default function App() {
           <div key={`${title}-${stream.id}`} className="flex flex-col sm:flex-row sm:items-center space-y-3 sm:space-y-0 sm:space-x-3 p-3 bg-slate-50/50 rounded-xl border border-slate-100">
             <div className="flex-1 flex items-center space-x-2">
               {stream.isPermanent || isReadOnly ? (
-                <div className="block w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 truncate">
+                <div className="block w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 truncate group relative">
                   {stream.name}
+                  {stream.name === 'Payment Processing' && (
+                    <div className="hidden group-hover:block absolute z-10 w-64 p-2 mt-1 text-xs font-normal text-white bg-slate-800 rounded-lg shadow-lg -left-2 top-full">
+                      Formula: (Total Volume × 2.9%) + (Total Transactions × €0.30)
+                      <br />
+                      <span className="opacity-70 italic">Includes both Subscriptions and Bookings.</span>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <input
@@ -941,39 +1140,48 @@ export default function App() {
               )}
             </div>
             
-            <div className="grid grid-cols-6 gap-2 w-full sm:max-w-[400px]">
+            <div className={`grid ${showTotal ? 'grid-cols-6' : 'grid-cols-5'} gap-2 w-full sm:max-w-[550px]`}>
               {years.map(y => (
                 <div key={y} className="relative">
-                  <input
-                    type="number"
-                    value={stream.amounts[y]}
-                    onChange={(e) => updateStreamAmount(streams, stream.id, y, e.target.value ? Number(e.target.value) : '', stateKey)}
-                    className={`block w-full px-1 py-2 border border-slate-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-xs text-center transition-colors ${(stream.isCalculated || isReadOnly) ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : ''} ${Number(stream.amounts[y]) < 0 ? 'text-red-600' : ''}`}
-                    placeholder="0"
-                    disabled={stream.isCalculated || isReadOnly}
-                  />
+                  {isReadOnly || stream.isCalculated ? (
+                    <div className={`block w-full px-1 py-2 border border-slate-200 bg-slate-100 rounded-lg text-xs text-center text-slate-500 transition-colors ${Number(stream.amounts[y]) < 0 ? 'text-red-600' : ''}`}>
+                      {formatValue(Number(stream.amounts[y]))}
+                    </div>
+                  ) : (
+                    <input
+                      type="number"
+                      value={stream.amounts[y]}
+                      onChange={(e) => updateStreamAmount(streams, stream.id, y, e.target.value ? Number(e.target.value) : '', stateKey)}
+                      className={`block w-full px-1 py-2 border border-slate-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-xs text-center transition-colors ${Number(stream.amounts[y]) < 0 ? 'text-red-600' : ''}`}
+                      placeholder="0"
+                    />
+                  )}
                 </div>
               ))}
-              <div className={`flex items-center justify-end text-sm font-semibold truncate ${getStreamTotal(stream) >= 0 ? 'text-slate-700' : 'text-red-600'}`}>
-                {formatValue(getStreamTotal(stream))}
-              </div>
+              {showTotal && (
+                <div className={`flex items-center justify-end text-sm font-semibold whitespace-nowrap ${getStreamTotal(stream) >= 0 ? 'text-slate-700' : 'text-red-600'}`}>
+                  {formatValue(getStreamTotal(stream))}
+                </div>
+              )}
             </div>
           </div>
         ))}
       </div>
-      <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center space-y-3 sm:space-y-0 sm:space-x-3">
-        <div className="flex-1 text-sm font-medium text-slate-500">Total {title}</div>
-        <div className="grid grid-cols-6 gap-2 w-full sm:max-w-[400px]">
-          {years.map(y => (
-            <div key={y} className={`text-center text-xs font-semibold truncate ${totalsByYear[y] >= 0 ? 'text-slate-700' : 'text-red-600'}`}>
-              {formatValue(totalsByYear[y])}
+      {showTotal && (
+        <div className="mt-4 pt-4 p-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center space-y-3 sm:space-y-0 sm:space-x-3">
+          <div className="flex-1 text-sm font-medium text-slate-500">Total {title}</div>
+          <div className="grid grid-cols-6 gap-2 w-full sm:max-w-[550px]">
+            {years.map(y => (
+              <div key={y} className={`text-center text-xs font-semibold whitespace-nowrap ${totalsByYear[y] >= 0 ? 'text-slate-700' : 'text-red-600'}`}>
+                {formatValue(totalsByYear[y])}
+              </div>
+            ))}
+            <div className={`flex items-center justify-end text-sm font-bold whitespace-nowrap ${total >= 0 ? 'text-slate-900' : 'text-red-700'}`}>
+              {formatValue(total)}
             </div>
-          ))}
-          <div className={`flex items-center justify-end text-sm font-bold truncate ${total >= 0 ? 'text-slate-900' : 'text-red-700'}`}>
-            {formatValue(total)}
           </div>
         </div>
-      </div>
+      )}
     </div>
   )};
 
@@ -1082,61 +1290,61 @@ export default function App() {
                       <tr className="border-b border-slate-50">
                         <td className="py-2 px-2 font-medium text-slate-700">Revenues</td>
                         {years.map(y => (
-                          <td key={y} className={`text-right py-2 px-2 font-mono ${totalRevenueByYear[y] >= 0 ? 'text-slate-600' : 'text-red-600'}`}>{formatCurrency(totalRevenueByYear[y])}</td>
+                          <td key={y} className={`text-right py-2 px-2 font-mono whitespace-nowrap ${totalRevenueByYear[y] >= 0 ? 'text-slate-600' : 'text-red-600'}`}>{formatCurrency(totalRevenueByYear[y])}</td>
                         ))}
-                        <td className={`text-right py-2 px-2 font-bold bg-slate-50/50 font-mono ${totalRevenue >= 0 ? 'text-slate-900' : 'text-red-900'}`}>{formatCurrency(totalRevenue)}</td>
+                        <td className={`text-right py-2 px-2 font-bold bg-slate-50/50 font-mono whitespace-nowrap ${totalRevenue >= 0 ? 'text-slate-900' : 'text-red-900'}`}>{formatCurrency(totalRevenue)}</td>
                       </tr>
                       <tr className="border-b border-slate-50">
                         <td className="py-2 px-2 font-medium text-slate-700">COGS</td>
                         {years.map(y => (
-                          <td key={y} className={`text-right py-2 px-2 font-mono ${totalVarCostsByYear[y] >= 0 ? 'text-slate-600' : 'text-red-600'}`}>{formatCurrency(totalVarCostsByYear[y])}</td>
+                          <td key={y} className={`text-right py-2 px-2 font-mono whitespace-nowrap ${totalVarCostsByYear[y] >= 0 ? 'text-slate-600' : 'text-red-600'}`}>{formatCurrency(totalVarCostsByYear[y])}</td>
                         ))}
-                        <td className={`text-right py-2 px-2 font-bold bg-slate-50/50 font-mono ${totalVariableCosts >= 0 ? 'text-slate-900' : 'text-red-900'}`}>{formatCurrency(totalVariableCosts)}</td>
+                        <td className={`text-right py-2 px-2 font-bold bg-slate-50/50 font-mono whitespace-nowrap ${totalVariableCosts >= 0 ? 'text-slate-900' : 'text-red-900'}`}>{formatCurrency(totalVariableCosts)}</td>
                       </tr>
                       <tr className="border-b border-slate-50 bg-emerald-50/30">
                         <td className="py-2 px-2 font-semibold text-emerald-700">Gross Margin</td>
                         {years.map(y => (
-                          <td key={y} className={`text-right py-2 px-2 font-bold font-mono ${grossMarginByYear[y] >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                          <td key={y} className={`text-right py-2 px-2 font-bold font-mono whitespace-nowrap ${grossMarginByYear[y] >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                             {formatCurrency(grossMarginByYear[y])}
                           </td>
                         ))}
-                        <td className={`text-right py-2 px-2 font-bold bg-emerald-50/50 font-mono ${grossMargin >= 0 ? 'text-emerald-800' : 'text-red-800'}`}>
+                        <td className={`text-right py-2 px-2 font-bold bg-emerald-50/50 font-mono whitespace-nowrap ${grossMargin >= 0 ? 'text-emerald-800' : 'text-red-800'}`}>
                           {formatCurrency(grossMargin)}
                         </td>
                       </tr>
                       <tr className="border-b border-slate-50 bg-emerald-50/10">
                         <td className="py-2 px-2 text-xs font-medium text-emerald-600 italic pl-4">Gross Margin %</td>
                         {years.map(y => (
-                          <td key={y} className="text-right py-2 px-2 text-emerald-500 font-mono text-xs">{grossMarginPercentByYear[y].toFixed(1)}%</td>
+                          <td key={y} className="text-right py-2 px-2 text-emerald-500 font-mono text-xs whitespace-nowrap">{grossMarginPercentByYear[y].toFixed(1)}%</td>
                         ))}
-                        <td className="text-right py-2 px-2 font-bold text-emerald-700 bg-emerald-50/20 font-mono text-xs">{calculatedMarginPercent.toFixed(1)}%</td>
+                        <td className="text-right py-2 px-2 font-bold text-emerald-700 bg-emerald-50/20 font-mono text-xs whitespace-nowrap">{calculatedMarginPercent.toFixed(1)}%</td>
                       </tr>
                       <tr className="border-b border-slate-50">
                         <td className="py-2 px-2 font-medium text-slate-700">Fixed Costs</td>
                         {years.map(y => (
-                          <td key={y} className={`text-right py-2 px-2 font-mono ${totalFixedCostsByYear[y] >= 0 ? 'text-slate-600' : 'text-red-600'}`}>{formatCurrency(totalFixedCostsByYear[y])}</td>
+                          <td key={y} className={`text-right py-2 px-2 font-mono whitespace-nowrap ${totalFixedCostsByYear[y] >= 0 ? 'text-slate-600' : 'text-red-600'}`}>{formatCurrency(totalFixedCostsByYear[y])}</td>
                         ))}
-                        <td className={`text-right py-2 px-2 font-bold bg-slate-50/50 font-mono ${fixedCosts >= 0 ? 'text-slate-900' : 'text-red-900'}`}>{formatCurrency(fixedCosts)}</td>
+                        <td className={`text-right py-2 px-2 font-bold bg-slate-50/50 font-mono whitespace-nowrap ${fixedCosts >= 0 ? 'text-slate-900' : 'text-red-900'}`}>{formatCurrency(fixedCosts)}</td>
                       </tr>
                       <tr className="bg-indigo-50/30">
                         <td className="py-2 px-2 font-semibold text-indigo-700">Operating Profit</td>
                         {years.map(y => (
-                          <td key={y} className={`text-right py-2 px-2 font-bold font-mono ${opProfitByYear[y] >= 0 ? 'text-indigo-600' : 'text-red-600'}`}>
+                          <td key={y} className={`text-right py-2 px-2 font-bold font-mono whitespace-nowrap ${opProfitByYear[y] >= 0 ? 'text-indigo-600' : 'text-red-600'}`}>
                             {formatCurrency(opProfitByYear[y])}
                           </td>
                         ))}
-                        <td className={`text-right py-2 px-2 font-bold bg-indigo-50/50 font-mono ${operatingProfit >= 0 ? 'text-indigo-800' : 'text-red-800'}`}>
+                        <td className={`text-right py-2 px-2 font-bold bg-indigo-50/50 font-mono whitespace-nowrap ${operatingProfit >= 0 ? 'text-indigo-800' : 'text-red-800'}`}>
                           {formatCurrency(operatingProfit)}
                         </td>
                       </tr>
                       <tr className="bg-indigo-50/10">
                         <td className="py-2 px-2 text-xs font-medium text-indigo-600 italic pl-4">Operating Profit %</td>
                         {years.map(y => (
-                          <td key={y} className={`text-right py-2 px-2 font-mono text-xs ${opProfitPercentByYear[y] >= 0 ? 'text-indigo-500' : 'text-red-500'}`}>
+                          <td key={y} className={`text-right py-2 px-2 font-mono text-xs whitespace-nowrap ${opProfitPercentByYear[y] >= 0 ? 'text-indigo-500' : 'text-red-500'}`}>
                             {opProfitPercentByYear[y].toFixed(1)}%
                           </td>
                         ))}
-                        <td className={`text-right py-2 px-2 font-bold bg-indigo-50/20 font-mono text-xs ${calculatedOpProfitPercent >= 0 ? 'text-indigo-700' : 'text-red-700'}`}>
+                        <td className={`text-right py-2 px-2 font-bold bg-indigo-50/20 font-mono text-xs whitespace-nowrap ${calculatedOpProfitPercent >= 0 ? 'text-indigo-700' : 'text-red-700'}`}>
                           {calculatedOpProfitPercent.toFixed(1)}%
                         </td>
                       </tr>
@@ -1285,7 +1493,7 @@ export default function App() {
         {activeTab === 'platform' && (
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
             <div className="xl:col-span-7 space-y-6">
-              {renderStreamSection('Platform Metrics', platformMetricsStreams, 'Metric', totalPlatformMetrics, totalPlatformMetricsByYear, 'platformMetricsStreams', 'number')}
+              {renderStreamSection('Platform Metrics', platformMetricsStreams, 'Metric', totalPlatformMetrics, totalPlatformMetricsByYear, 'platformMetricsStreams', 'number', false)}
               
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6">
                 <h2 className="text-lg font-medium flex items-center space-x-2">
