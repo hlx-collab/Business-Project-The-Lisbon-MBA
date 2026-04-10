@@ -23,8 +23,12 @@ interface MarketData {
 }
 
 const DEFAULT_PLATFORM_METRICS: FinancialStream[] = [
-  { id: 'pm-1', name: 'Number of providers in the platform', amounts: ['', '', '', '', ''], isPermanent: true },
-  { id: 'pm-2', name: 'Number of owners in the platform', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'pm-new-providers', name: 'New providers added', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'pm-churn-providers', name: 'Provider churn rate (%)', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'pm-1', name: 'Number of providers in the platform', amounts: ['', '', '', '', ''], isPermanent: true, isCalculated: true },
+  { id: 'pm-new-owners', name: 'New owners added', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'pm-churn-owners', name: 'Owner churn rate (%)', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'pm-2', name: 'Number of owners in the platform', amounts: ['', '', '', '', ''], isPermanent: true, isCalculated: true },
   { id: 'pm-3', name: 'Avg price per booking', amounts: ['', '', '', '', ''], isPermanent: true },
   { id: 'pm-4', name: '% of bookings commission', amounts: ['', '', '', '', ''], isPermanent: true },
   { id: 'pm-5', name: 'Monthly Subscription fee', amounts: ['', '', '', '', ''], isPermanent: true },
@@ -72,7 +76,50 @@ export default function App() {
 
     const saved = localStorage.getItem('marketsData');
     if (saved) {
-      return JSON.parse(saved);
+      const parsed = JSON.parse(saved);
+      const upgrade = (market: MarketData): MarketData => {
+        const syncStreams = (current: FinancialStream[], defaults: FinancialStream[]) => {
+          const result: FinancialStream[] = [];
+          
+          // 1. Add defaults in order, using current values if available
+          defaults.forEach(def => {
+            const existing = (current || []).find(s => s.name === def.name);
+            if (existing) {
+              result.push({
+                ...existing,
+                isCalculated: def.isCalculated,
+                isPermanent: def.isPermanent,
+                id: def.id // Ensure IDs match for internal logic
+              });
+            } else {
+              result.push({ ...def });
+            }
+          });
+
+          // 2. Add any custom streams from current that aren't in defaults
+          (current || []).forEach(s => {
+            if (!defaults.find(d => d.name === s.name)) {
+              result.push(s);
+            }
+          });
+
+          return result;
+        };
+
+        const base = market || defaultMarketData();
+        return {
+          ...base,
+          platformMetricsStreams: syncStreams(base.platformMetricsStreams, DEFAULT_PLATFORM_METRICS),
+          revenueStreams: syncStreams(base.revenueStreams, DEFAULT_REVENUE_STREAMS),
+          variableCostsStreams: syncStreams(base.variableCostsStreams, DEFAULT_VARIABLE_COSTS_STREAMS),
+          fixedCostsStreams: syncStreams(base.fixedCostsStreams, DEFAULT_FIXED_COSTS_STREAMS),
+        };
+      };
+
+      return {
+        Portugal: upgrade(parsed.Portugal),
+        UK: upgrade(parsed.UK)
+      };
     }
 
     // Migration logic for old data
@@ -107,10 +154,50 @@ export default function App() {
   const calculateFinancials = (data: MarketData) => {
     const { platformMetricsStreams, revenueStreams, variableCostsStreams, fixedCostsStreams, chargeSubscription, chargeBookingFees } = data;
 
+    const derivedPlatformMetricsStreams = platformMetricsStreams.map(stream => {
+      if (stream.id === 'pm-1' || stream.name === 'Number of providers in the platform') {
+        const newProvidersStream = platformMetricsStreams.find(s => s.id === 'pm-new-providers' || s.name === 'New providers added');
+        const churnProvidersStream = platformMetricsStreams.find(s => s.id === 'pm-churn-providers' || s.name === 'Provider churn rate (%)');
+        
+        const amounts: (number | '')[] = [];
+        let runningTotal = 0;
+        
+        years.forEach(y => {
+          const newProviders = Number(newProvidersStream?.amounts?.[y]) || 0;
+          const churnRate = (Number(churnProvidersStream?.amounts?.[y]) || 0) / 100;
+          
+          // Formula: Total(t) = Total(t-1) * (1 - Churn(t)) + New(t)
+          runningTotal = (runningTotal * (1 - churnRate)) + newProviders;
+          amounts.push(Math.round(runningTotal));
+        });
+        
+        return { ...stream, amounts, isCalculated: true };
+      }
+      if (stream.id === 'pm-2' || stream.name === 'Number of owners in the platform') {
+        const newOwnersStream = platformMetricsStreams.find(s => s.id === 'pm-new-owners' || s.name === 'New owners added');
+        const churnOwnersStream = platformMetricsStreams.find(s => s.id === 'pm-churn-owners' || s.name === 'Owner churn rate (%)');
+        
+        const amounts: (number | '')[] = [];
+        let runningTotal = 0;
+        
+        years.forEach(y => {
+          const newOwners = Number(newOwnersStream?.amounts?.[y]) || 0;
+          const churnRate = (Number(churnOwnersStream?.amounts?.[y]) || 0) / 100;
+          
+          // Formula: Total(t) = Total(t-1) * (1 - Churn(t)) + New(t)
+          runningTotal = (runningTotal * (1 - churnRate)) + newOwners;
+          amounts.push(Math.round(runningTotal));
+        });
+        
+        return { ...stream, amounts, isCalculated: true };
+      }
+      return stream;
+    });
+
     const derivedRevenueStreams = revenueStreams.map(stream => {
       if (stream.id === 'rev-1' || stream.name === 'Monthly Subscriptions') {
-        const providersStream = platformMetricsStreams.find(s => s.id === 'pm-1' || s.name === 'Number of providers in the platform');
-        const subFeeStream = platformMetricsStreams.find(s => s.id === 'pm-5' || s.name === 'Monthly Subscription fee');
+        const providersStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-1' || s.name === 'Number of providers in the platform');
+        const subFeeStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-5' || s.name === 'Monthly Subscription fee');
         
         const amounts = years.map(y => {
           const providers = Number(providersStream?.amounts?.[y]) || 0;
@@ -122,10 +209,10 @@ export default function App() {
         return { ...stream, amounts, isCalculated: true };
       }
       if (stream.id === 'rev-2' || stream.name === 'Booking Fees') {
-        const ownersStream = platformMetricsStreams.find(s => s.id === 'pm-2' || s.name === 'Number of owners in the platform');
-        const bookingsPerOwnerStream = platformMetricsStreams.find(s => s.id === 'pm-6' || s.name === '# of yearly bookings per pet owners');
-        const avgPriceStream = platformMetricsStreams.find(s => s.id === 'pm-3' || s.name === 'Avg price per booking');
-        const commissionStream = platformMetricsStreams.find(s => s.id === 'pm-4' || s.name === '% of bookings commission');
+        const ownersStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-2' || s.name === 'Number of owners in the platform');
+        const bookingsPerOwnerStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-6' || s.name === '# of yearly bookings per pet owners');
+        const avgPriceStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-3' || s.name === 'Avg price per booking');
+        const commissionStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-4' || s.name === '% of bookings commission');
         
         const amounts = years.map(y => {
           const owners = Number(ownersStream?.amounts?.[y]) || 0;
@@ -144,11 +231,11 @@ export default function App() {
 
     const derivedVariableCostsStreams = variableCostsStreams.map(stream => {
       if (stream.id === 'vc-1' || stream.name === 'Payment Processing') {
-        const providersStream = platformMetricsStreams.find(s => s.id === 'pm-1' || s.name === 'Number of providers in the platform');
-        const subFeeStream = platformMetricsStreams.find(s => s.id === 'pm-5' || s.name === 'Monthly Subscription fee');
-        const ownersStream = platformMetricsStreams.find(s => s.id === 'pm-2' || s.name === 'Number of owners in the platform');
-        const bookingsPerOwnerStream = platformMetricsStreams.find(s => s.id === 'pm-6' || s.name === '# of yearly bookings per pet owners');
-        const avgPriceStream = platformMetricsStreams.find(s => s.id === 'pm-3' || s.name === 'Avg price per booking');
+        const providersStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-1' || s.name === 'Number of providers in the platform');
+        const subFeeStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-5' || s.name === 'Monthly Subscription fee');
+        const ownersStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-2' || s.name === 'Number of owners in the platform');
+        const bookingsPerOwnerStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-6' || s.name === '# of yearly bookings per pet owners');
+        const avgPriceStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-3' || s.name === 'Avg price per booking');
         
         const amounts = years.map(y => {
           const providers = Number(providersStream?.amounts?.[y]) || 0;
@@ -173,19 +260,14 @@ export default function App() {
         return { ...stream, amounts, isCalculated: true };
       }
       if (stream.id === 'vc-3' || stream.name === 'Customer acquisition costs') {
-        const providersStream = platformMetricsStreams.find(s => s.id === 'pm-1' || s.name === 'Number of providers in the platform');
-        const ownersStream = platformMetricsStreams.find(s => s.id === 'pm-2' || s.name === 'Number of owners in the platform');
-        const unitCacProvidersStream = platformMetricsStreams.find(s => s.id === 'pm-cac-providers' || s.name === 'Unit CAC - Providers');
-        const unitCacOwnersStream = platformMetricsStreams.find(s => s.id === 'pm-cac-owners' || s.name === 'Unit CAC - Owners');
+        const newProvidersStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-new-providers' || s.name === 'New providers added');
+        const newOwnersStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-new-owners' || s.name === 'New owners added');
+        const unitCacProvidersStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-cac-providers' || s.name === 'Unit CAC - Providers');
+        const unitCacOwnersStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-cac-owners' || s.name === 'Unit CAC - Owners');
         
         const amounts = years.map(y => {
-          const currentProviders = Number(providersStream?.amounts?.[y]) || 0;
-          const currentOwners = Number(ownersStream?.amounts?.[y]) || 0;
-          const prevProviders = y > 0 ? (Number(providersStream?.amounts?.[y - 1]) || 0) : 0;
-          const prevOwners = y > 0 ? (Number(ownersStream?.amounts?.[y - 1]) || 0) : 0;
-          
-          const newProviders = Math.max(0, currentProviders - prevProviders);
-          const newOwners = Math.max(0, currentOwners - prevOwners);
+          const newProviders = Number(newProvidersStream?.amounts?.[y]) || 0;
+          const newOwners = Number(newOwnersStream?.amounts?.[y]) || 0;
           
           const unitCacProviders = Number(unitCacProvidersStream?.amounts?.[y]) || 0;
           const unitCacOwners = Number(unitCacOwnersStream?.amounts?.[y]) || 0;
@@ -195,10 +277,10 @@ export default function App() {
         return { ...stream, amounts, isCalculated: true };
       }
       if (stream.id === 'vc-2' || stream.name === 'Customer Support') {
-        const providersStream = platformMetricsStreams.find(s => s.id === 'pm-1' || s.name === 'Number of providers in the platform');
-        const ownersStream = platformMetricsStreams.find(s => s.id === 'pm-2' || s.name === 'Number of owners in the platform');
-        const unitSupportProvidersStream = platformMetricsStreams.find(s => s.id === 'pm-cs-providers' || s.name === 'Unit Customer Support cost - Providers');
-        const unitSupportOwnersStream = platformMetricsStreams.find(s => s.id === 'pm-cs-owners' || s.name === 'Unit Customer Support cost - Owners');
+        const providersStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-1' || s.name === 'Number of providers in the platform');
+        const ownersStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-2' || s.name === 'Number of owners in the platform');
+        const unitSupportProvidersStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-cs-providers' || s.name === 'Unit Customer Support cost - Providers');
+        const unitSupportOwnersStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-cs-owners' || s.name === 'Unit Customer Support cost - Owners');
         
         const amounts = years.map(y => {
           const providers = Number(providersStream?.amounts?.[y]) || 0;
@@ -216,7 +298,7 @@ export default function App() {
     const totalRevenueByYear = years.map(y => derivedRevenueStreams.reduce((sum, stream) => sum + (Number(stream.amounts[y]) || 0), 0));
     const totalVarCostsByYear = years.map(y => derivedVariableCostsStreams.reduce((sum, stream) => sum + (Number(stream.amounts[y]) || 0), 0));
     const totalFixedCostsByYear = years.map(y => fixedCostsStreams.reduce((sum, stream) => sum + (Number(stream.amounts[y]) || 0), 0));
-    const totalPlatformMetricsByYear = years.map(y => platformMetricsStreams.reduce((sum, stream) => sum + (Number(stream.amounts[y]) || 0), 0));
+    const totalPlatformMetricsByYear = years.map(y => derivedPlatformMetricsStreams.reduce((sum, stream) => sum + (Number(stream.amounts[y]) || 0), 0));
 
     const grossMarginByYear = years.map(y => totalRevenueByYear[y] - totalVarCostsByYear[y]);
     const grossMarginPercentByYear = years.map(y => totalRevenueByYear[y] > 0 ? (grossMarginByYear[y] / totalRevenueByYear[y]) * 100 : 0);
@@ -233,6 +315,7 @@ export default function App() {
     const calculatedOpProfitPercent = totalRevenue > 0 ? (operatingProfit / totalRevenue) * 100 : 0;
 
     return {
+      platformMetricsStreams: derivedPlatformMetricsStreams,
       derivedRevenueStreams,
       derivedVariableCostsStreams,
       totalRevenueByYear,
@@ -339,25 +422,25 @@ export default function App() {
                 const totalW = w1 + w2;
                 result = totalW > 0 ? (metricVal1 * w1 + metricVal2 * w2) / totalW : 0;
               } else if (name === 'Unit CAC - Providers') {
-                const getNew = (fin: any, year: number) => {
-                  const curr = getVal(fin, 'Number of providers in the platform', year);
-                  const prev = year > 0 ? getVal(fin, 'Number of providers in the platform', year - 1) : 0;
-                  return Math.max(0, curr - prev);
-                };
-                const w1 = getNew(ptFin, y);
-                const w2 = getNew(ukFin, y);
+                const w1 = getVal(ptFin, 'New providers added', y);
+                const w2 = getVal(ukFin, 'New providers added', y);
                 const totalW = w1 + w2;
                 result = totalW > 0 ? (metricVal1 * w1 + metricVal2 * w2) / totalW : 0;
               } else if (name === 'Unit CAC - Owners') {
-                const getNew = (fin: any, year: number) => {
-                  const curr = getVal(fin, 'Number of owners in the platform', year);
-                  const prev = year > 0 ? getVal(fin, 'Number of owners in the platform', year - 1) : 0;
-                  return Math.max(0, curr - prev);
-                };
-                const w1 = getNew(ptFin, y);
-                const w2 = getNew(ukFin, y);
+                const w1 = getVal(ptFin, 'New owners added', y);
+                const w2 = getVal(ukFin, 'New owners added', y);
                 const totalW = w1 + w2;
                 result = totalW > 0 ? (metricVal1 * w1 + metricVal2 * w2) / totalW : 0;
+              } else if (name === 'Provider churn rate (%)') {
+                const w1 = y > 0 ? getVal(ptFin, 'Number of providers in the platform', y - 1) : getVal(ptFin, 'Number of providers in the platform', y);
+                const w2 = y > 0 ? getVal(ukFin, 'Number of providers in the platform', y - 1) : getVal(ukFin, 'Number of providers in the platform', y);
+                const totalW = w1 + w2;
+                result = totalW > 0 ? (metricVal1 * w1 + metricVal2 * w2) / totalW : (metricVal1 + metricVal2) / 2;
+              } else if (name === 'Owner churn rate (%)') {
+                const w1 = y > 0 ? getVal(ptFin, 'Number of owners in the platform', y - 1) : getVal(ptFin, 'Number of owners in the platform', y);
+                const w2 = y > 0 ? getVal(ukFin, 'Number of owners in the platform', y - 1) : getVal(ukFin, 'Number of owners in the platform', y);
+                const totalW = w1 + w2;
+                result = totalW > 0 ? (metricVal1 * w1 + metricVal2 * w2) / totalW : (metricVal1 + metricVal2) / 2;
               } else {
                 result = metricVal1 + metricVal2;
               }
@@ -586,13 +669,22 @@ export default function App() {
     const ptFin = { ...markets.Portugal, ...calculateFinancials(markets.Portugal) };
     const ukFin = { ...markets.UK, ...calculateFinancials(markets.UK) };
 
-    const getUnion = (s1: FinancialStream[], s2: FinancialStream[]) => 
-      Array.from(new Set([...s1.map(s => s.name), ...s2.map(s => s.name)]));
+    const getUnion = (s1: FinancialStream[], s2: FinancialStream[], defaults: FinancialStream[]) => {
+      const names = Array.from(new Set([...s1.map(s => s.name), ...s2.map(s => s.name)]));
+      return names.sort((a, b) => {
+        const idxA = defaults.findIndex(d => d.name === a);
+        const idxB = defaults.findIndex(d => d.name === b);
+        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+        if (idxA !== -1) return -1;
+        if (idxB !== -1) return 1;
+        return 0;
+      });
+    };
 
-    const platformUnion = getUnion(ptFin.platformMetricsStreams, ukFin.platformMetricsStreams);
-    const revenueUnion = getUnion(ptFin.derivedRevenueStreams, ukFin.derivedRevenueStreams);
-    const cogsUnion = getUnion(ptFin.derivedVariableCostsStreams, ukFin.derivedVariableCostsStreams);
-    const fixedUnion = getUnion(ptFin.fixedCostsStreams, ukFin.fixedCostsStreams);
+    const platformUnion = getUnion(ptFin.platformMetricsStreams, ukFin.platformMetricsStreams, DEFAULT_PLATFORM_METRICS);
+    const revenueUnion = getUnion(ptFin.derivedRevenueStreams, ukFin.derivedRevenueStreams, DEFAULT_REVENUE_STREAMS);
+    const cogsUnion = getUnion(ptFin.derivedVariableCostsStreams, ukFin.derivedVariableCostsStreams, DEFAULT_VARIABLE_COSTS_STREAMS);
+    const fixedUnion = getUnion(ptFin.fixedCostsStreams, ukFin.fixedCostsStreams, DEFAULT_FIXED_COSTS_STREAMS);
 
     marketsToExport.forEach(market => {
       const rows: any[][] = [];
@@ -636,7 +728,9 @@ export default function App() {
               'Unit CAC - Providers',
               'Unit CAC - Owners',
               'Unit Customer Support cost - Providers',
-              'Unit Customer Support cost - Owners'
+              'Unit Customer Support cost - Owners',
+              'Provider churn rate (%)',
+              'Owner churn rate (%)'
             ];
 
             if (weightedMetrics.includes(name)) {
@@ -687,27 +781,39 @@ export default function App() {
                   wUk = "0";
                 }
               } else if (name === 'Unit CAC - Providers') {
-                const wRow = metricRowMap['Number of providers in the platform'];
+                const wRow = metricRowMap['New providers added'];
                 if (wRow !== undefined) {
-                  const pPt = `'Portugal'!${col}${wRow+1}`;
-                  const pUk = `'UK'!${col}${wRow+1}`;
-                  const prevPPt = y > 0 ? `'Portugal'!${getColLetter(1 + y)}${wRow+1}` : "0";
-                  const prevPUk = y > 0 ? `'UK'!${getColLetter(1 + y)}${wRow+1}` : "0";
-                  wPt = `MAX(0, ${pPt}-${prevPPt})`;
-                  wUk = `MAX(0, ${pUk}-${prevPUk})`;
+                  wPt = `'Portugal'!${col}${wRow+1}`;
+                  wUk = `'UK'!${col}${wRow+1}`;
                 } else {
                   wPt = "0";
                   wUk = "0";
                 }
               } else if (name === 'Unit CAC - Owners') {
+                const wRow = metricRowMap['New owners added'];
+                if (wRow !== undefined) {
+                  wPt = `'Portugal'!${col}${wRow+1}`;
+                  wUk = `'UK'!${col}${wRow+1}`;
+                } else {
+                  wPt = "0";
+                  wUk = "0";
+                }
+              } else if (name === 'Provider churn rate (%)') {
+                const wRow = metricRowMap['Number of providers in the platform'];
+                if (wRow !== undefined) {
+                  const prevCol = y > 0 ? getColLetter(1 + y) : col;
+                  wPt = `'Portugal'!${prevCol}${wRow+1}`;
+                  wUk = `'UK'!${prevCol}${wRow+1}`;
+                } else {
+                  wPt = "0";
+                  wUk = "0";
+                }
+              } else if (name === 'Owner churn rate (%)') {
                 const wRow = metricRowMap['Number of owners in the platform'];
                 if (wRow !== undefined) {
-                  const pPt = `'Portugal'!${col}${wRow+1}`;
-                  const pUk = `'UK'!${col}${wRow+1}`;
-                  const prevPPt = y > 0 ? `'Portugal'!${getColLetter(1 + y)}${wRow+1}` : "0";
-                  const prevPUk = y > 0 ? `'UK'!${getColLetter(1 + y)}${wRow+1}` : "0";
-                  wPt = `MAX(0, ${pPt}-${prevPPt})`;
-                  wUk = `MAX(0, ${pUk}-${prevPUk})`;
+                  const prevCol = y > 0 ? getColLetter(1 + y) : col;
+                  wPt = `'Portugal'!${prevCol}${wRow+1}`;
+                  wUk = `'UK'!${prevCol}${wRow+1}`;
                 } else {
                   wPt = "0";
                   wUk = "0";
@@ -720,7 +826,33 @@ export default function App() {
             }
           } else {
             const val = getStreamValue(market as Market, 'Platform Metric', name, y);
-            if (name === '% of bookings commission') {
+            if (name === 'Number of providers in the platform') {
+              const newRow = metricRowMap['New providers added'];
+              const churnRow = metricRowMap['Provider churn rate (%)'];
+              const col = getColLetter(2 + y);
+              const prevCol = y > 0 ? getColLetter(1 + y) : null;
+              if (newRow !== undefined && churnRow !== undefined) {
+                const newRef = `${col}${newRow+1}`;
+                const churnRef = `${col}${churnRow+1}`;
+                const prevRef = prevCol ? `${prevCol}${currentRow+1}` : "0";
+                rowData.push({ f: `ROUND(${prevRef} * (1 - ${churnRef}/100) + ${newRef}, 0)` });
+              } else {
+                rowData.push(val);
+              }
+            } else if (name === 'Number of owners in the platform') {
+              const newRow = metricRowMap['New owners added'];
+              const churnRow = metricRowMap['Owner churn rate (%)'];
+              const col = getColLetter(2 + y);
+              const prevCol = y > 0 ? getColLetter(1 + y) : null;
+              if (newRow !== undefined && churnRow !== undefined) {
+                const newRef = `${col}${newRow+1}`;
+                const churnRef = `${col}${churnRow+1}`;
+                const prevRef = prevCol ? `${prevCol}${currentRow+1}` : "0";
+                rowData.push({ f: `ROUND(${prevRef} * (1 - ${churnRef}/100) + ${newRef}, 0)` });
+              } else {
+                rowData.push(val);
+              }
+            } else if (name.includes('%')) {
               rowData.push(val / 100);
             } else {
               rowData.push(val);
