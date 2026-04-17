@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Calculator, DollarSign, TrendingUp, Activity, Plus, Trash2, Percent, Download } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LabelList, Legend } from 'recharts';
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LabelList, Legend } from 'recharts';
 import * as XLSX from 'xlsx';
 
 interface FinancialStream {
@@ -587,6 +587,22 @@ export default function App() {
     'Fixed Costs': fixedCosts,
     'Op. Profit': operatingProfit
   }];
+
+  const platformChartData = years.map(y => {
+    const getVal = (name: string) => {
+      const stream = platformMetricsStreams.find(s => s.name === name);
+      return Number(stream?.amounts?.[y]) || 0;
+    };
+    return {
+      name: `Year ${y + 1}`,
+      'New Providers': getVal('New providers added'),
+      'Total Providers': getVal('Number of providers in the platform'),
+      'Provider Churn': getVal('Provider churn rate (%)'),
+      'New Owners': getVal('New owners added'),
+      'Total Owners': getVal('Number of owners in the platform'),
+      'Owner Churn': getVal('Owner churn rate (%)'),
+    };
+  });
 
   const formatTooltip = (value: any, name: any) => {
     const numValue = typeof value === 'number' ? value : Number(value);
@@ -1623,65 +1639,112 @@ export default function App() {
         )}
 
         {activeTab === 'platform' && (
-          <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
-            <div className="xl:col-span-7 space-y-6">
-              {renderStreamSection('Platform Metrics', platformMetricsStreams, 'Metric', totalPlatformMetrics, totalPlatformMetricsByYear, 'platformMetricsStreams', 'number', false)}
-              
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6">
-                <h2 className="text-lg font-medium flex items-center space-x-2">
-                  <Activity className="w-5 h-5 text-slate-400" />
-                  <span>Platform Settings</span>
-                </h2>
+          <div className="space-y-8">
+            <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
+              <div className="xl:col-span-7 space-y-6">
+                {renderStreamSection('Platform Metrics', platformMetricsStreams, 'Metric', totalPlatformMetrics, totalPlatformMetricsByYear, 'platformMetricsStreams', 'number', false)}
                 
-                <div className="space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100 space-y-4 sm:space-y-0 sm:space-x-4">
-                    <div className="flex-1">
-                      <h3 className="text-sm font-medium text-slate-900">Charge Subscription</h3>
-                      <p className="text-xs text-slate-500 mt-1">Enable subscription fees for users on the platform.</p>
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6">
+                  <h2 className="text-lg font-medium flex items-center space-x-2">
+                    <Activity className="w-5 h-5 text-slate-400" />
+                    <span>Platform Settings</span>
+                  </h2>
+                  
+                  <div className="space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100 space-y-4 sm:space-y-0 sm:space-x-4">
+                      <div className="flex-1">
+                        <h3 className="text-sm font-medium text-slate-900">Charge Subscription</h3>
+                        <p className="text-xs text-slate-500 mt-1">Enable subscription fees for users on the platform.</p>
+                      </div>
+                      <div className="grid grid-cols-5 gap-2 w-full sm:max-w-[300px]">
+                        {years.map(y => (
+                          <div key={y} className="flex flex-col items-center space-y-1">
+                            <span className="text-[10px] font-medium text-slate-500 uppercase">Y{y+1}</span>
+                            <button
+                              onClick={() => toggleCharge(y, 'chargeSubscription')}
+                              disabled={activeMarket === 'Aggregated'}
+                              className={`w-full py-1.5 text-xs font-medium rounded-md transition-colors ${
+                                chargeSubscription[y] 
+                                  ? 'bg-indigo-600 text-white shadow-sm' 
+                                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                              } ${activeMarket === 'Aggregated' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            >
+                              {chargeSubscription[y] ? 'Yes' : 'No'}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <div className="grid grid-cols-5 gap-2 w-full sm:max-w-[300px]">
-                      {years.map(y => (
-                        <div key={y} className="flex flex-col items-center space-y-1">
-                          <span className="text-[10px] font-medium text-slate-500 uppercase">Y{y+1}</span>
-                          <button
-                            onClick={() => toggleCharge(y, 'chargeSubscription')}
-                            disabled={activeMarket === 'Aggregated'}
-                            className={`w-full py-1.5 text-xs font-medium rounded-md transition-colors ${
-                              chargeSubscription[y] 
-                                ? 'bg-indigo-600 text-white shadow-sm' 
-                                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-                            } ${activeMarket === 'Aggregated' ? 'opacity-50 cursor-not-allowed' : ''}`}
-                          >
-                            {chargeSubscription[y] ? 'Yes' : 'No'}
-                          </button>
-                        </div>
-                      ))}
+
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100 space-y-4 sm:space-y-0 sm:space-x-4">
+                      <div className="flex-1">
+                        <h3 className="text-sm font-medium text-slate-900">Charge Booking Fees</h3>
+                        <p className="text-xs text-slate-500 mt-1">Enable booking fees for transactions on the platform.</p>
+                      </div>
+                      <div className="grid grid-cols-5 gap-2 w-full sm:max-w-[300px]">
+                        {years.map(y => (
+                          <div key={y} className="flex flex-col items-center space-y-1">
+                            <span className="text-[10px] font-medium text-slate-500 uppercase">Y{y+1}</span>
+                            <button
+                              onClick={() => toggleCharge(y, 'chargeBookingFees')}
+                              disabled={activeMarket === 'Aggregated'}
+                              className={`w-full py-1.5 text-xs font-medium rounded-md transition-colors ${
+                                chargeBookingFees[y] 
+                                  ? 'bg-indigo-600 text-white shadow-sm' 
+                                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                              } ${activeMarket === 'Aggregated' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            >
+                              {chargeBookingFees[y] ? 'Yes' : 'No'}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
+                </div>
+              </div>
 
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100 space-y-4 sm:space-y-0 sm:space-x-4">
-                    <div className="flex-1">
-                      <h3 className="text-sm font-medium text-slate-900">Charge Booking Fees</h3>
-                      <p className="text-xs text-slate-500 mt-1">Enable booking fees for transactions on the platform.</p>
-                    </div>
-                    <div className="grid grid-cols-5 gap-2 w-full sm:max-w-[300px]">
-                      {years.map(y => (
-                        <div key={y} className="flex flex-col items-center space-y-1">
-                          <span className="text-[10px] font-medium text-slate-500 uppercase">Y{y+1}</span>
-                          <button
-                            onClick={() => toggleCharge(y, 'chargeBookingFees')}
-                            disabled={activeMarket === 'Aggregated'}
-                            className={`w-full py-1.5 text-xs font-medium rounded-md transition-colors ${
-                              chargeBookingFees[y] 
-                                ? 'bg-indigo-600 text-white shadow-sm' 
-                                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-                            } ${activeMarket === 'Aggregated' ? 'opacity-50 cursor-not-allowed' : ''}`}
-                          >
-                            {chargeBookingFees[y] ? 'Yes' : 'No'}
-                          </button>
-                        </div>
-                      ))}
-                    </div>
+              <div className="xl:col-span-5 space-y-6">
+                {/* Platform Growth Chart */}
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                  <h2 className="text-lg font-medium mb-6">Platform Growth</h2>
+                  <div className="h-80 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={platformChartData}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
+                        <Tooltip 
+                          contentStyle={{ borderRadius: '0.75rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                        />
+                        <Legend verticalAlign="top" height={36}/>
+                        <Line type="monotone" dataKey="Total Providers" stroke="#0ea5e9" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                        <Line type="monotone" dataKey="Total Owners" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                        <Line type="monotone" dataKey="New Providers" stroke="#7dd3fc" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
+                        <Line type="monotone" dataKey="New Owners" stroke="#6ee7b7" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Churn Rates Chart */}
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                  <h2 className="text-lg font-medium mb-6">Churn Rates (%)</h2>
+                  <div className="h-64 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={platformChartData}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(val) => `${val}%`} />
+                        <Tooltip 
+                          formatter={(val) => [`${val}%`, '']}
+                          contentStyle={{ borderRadius: '0.75rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                        />
+                        <Legend verticalAlign="top" height={36}/>
+                        <Line type="monotone" dataKey="Provider Churn" stroke="#f59e0b" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                        <Line type="monotone" dataKey="Owner Churn" stroke="#6366f1" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
                   </div>
                 </div>
               </div>
