@@ -1705,46 +1705,100 @@ export default function App() {
               </div>
 
               <div className="xl:col-span-5 space-y-6">
-                {/* Platform Growth Chart */}
+                {/* Provider Analysis Chart */}
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                  <h2 className="text-lg font-medium mb-6">Platform Growth</h2>
+                  <h2 className="text-lg font-medium mb-6">Provider Analysis</h2>
                   <div className="h-80 w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={platformChartData}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
-                        <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
+                        <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
+                        <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(val) => `${val}%`} />
                         <Tooltip 
                           contentStyle={{ borderRadius: '0.75rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                          formatter={(value, name) => {
+                            if (name === 'Provider Churn') return [`${value}%`, name];
+                            return [value, name];
+                          }}
                         />
                         <Legend verticalAlign="top" height={36}/>
-                        <Line type="monotone" dataKey="Total Providers" stroke="#0ea5e9" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                        <Line type="monotone" dataKey="Total Owners" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                        <Line type="monotone" dataKey="New Providers" stroke="#7dd3fc" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
-                        <Line type="monotone" dataKey="New Owners" stroke="#6ee7b7" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
+                        <Line yAxisId="left" type="monotone" dataKey="Total Providers" stroke="#0ea5e9" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                        <Line yAxisId="left" type="monotone" dataKey="New Providers" stroke="#7dd3fc" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
+                        <Line yAxisId="right" type="monotone" dataKey="Provider Churn" stroke="#f59e0b" strokeWidth={3} strokeDasharray="1 5" dot={{ r: 4 }} activeDot={{ r: 6 }} />
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
                 </div>
 
-                {/* Churn Rates Chart */}
+                {/* Owner Analysis Chart */}
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                  <h2 className="text-lg font-medium mb-6">Churn Rates (%)</h2>
-                  <div className="h-64 w-full">
+                  <h2 className="text-lg font-medium mb-6">Owner Analysis</h2>
+                  <div className="h-80 w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={platformChartData}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
-                        <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(val) => `${val}%`} />
+                        <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
+                        <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(val) => `${val}%`} />
                         <Tooltip 
-                          formatter={(val) => [`${val}%`, '']}
                           contentStyle={{ borderRadius: '0.75rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                          formatter={(value, name) => {
+                            if (name === 'Owner Churn') return [`${value}%`, name];
+                            return [value, name];
+                          }}
                         />
                         <Legend verticalAlign="top" height={36}/>
-                        <Line type="monotone" dataKey="Provider Churn" stroke="#f59e0b" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                        <Line type="monotone" dataKey="Owner Churn" stroke="#6366f1" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                        <Line yAxisId="left" type="monotone" dataKey="Total Owners" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                        <Line yAxisId="left" type="monotone" dataKey="New Owners" stroke="#6ee7b7" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
+                        <Line yAxisId="right" type="monotone" dataKey="Owner Churn" stroke="#6366f1" strokeWidth={3} strokeDasharray="1 5" dot={{ r: 4 }} activeDot={{ r: 6 }} />
                       </LineChart>
                     </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Independent Churn Trend Charts */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+                    <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 flex items-center space-x-2">
+                      <div className="w-2 h-2 rounded-full bg-[#f59e0b]"></div>
+                      <span>Provider Churn Trend</span>
+                    </h2>
+                    <div className="h-32 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={platformChartData}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                          <YAxis domain={['auto', 'auto']} axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10 }} tickFormatter={(val) => `${val}%`} />
+                          <Tooltip 
+                            formatter={(val: any) => [`${val}%`, 'Churn']}
+                            contentStyle={{ borderRadius: '0.5rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
+                          />
+                          <Line type="monotone" dataKey="Provider Churn" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+                    <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 flex items-center space-x-2">
+                      <div className="w-2 h-2 rounded-full bg-[#6366f1]"></div>
+                      <span>Owner Churn Trend</span>
+                    </h2>
+                    <div className="h-32 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={platformChartData}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                          <YAxis domain={['auto', 'auto']} axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10 }} tickFormatter={(val) => `${val}%`} />
+                          <Tooltip 
+                            formatter={(val: any) => [`${val}%`, 'Churn']}
+                            contentStyle={{ borderRadius: '0.5rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
+                          />
+                          <Line type="monotone" dataKey="Owner Churn" stroke="#6366f1" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
                   </div>
                 </div>
               </div>
