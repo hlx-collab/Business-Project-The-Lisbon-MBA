@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { Calculator, DollarSign, TrendingUp, Activity, Plus, Trash2, Percent, Download } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Calculator, DollarSign, TrendingUp, Activity, Plus, Trash2, Percent, Download, Camera, Copy, Check } from 'lucide-react';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LabelList, Legend } from 'recharts';
 import * as XLSX from 'xlsx';
+import { toPng, toBlob } from 'html-to-image';
 
 interface FinancialStream {
   id: string;
@@ -63,6 +64,89 @@ const DEFAULT_FIXED_COSTS_STREAMS: FinancialStream[] = [
 export default function App() {
   const [activeTab, setActiveTab] = useState<'financials' | 'platform' | 'gross-margin'>('financials');
   const [activeMarket, setActiveMarket] = useState<Market>('Portugal');
+  const [copiedChart, setCopiedChart] = useState<string | null>(null);
+
+  const providerAnalysisRef = useRef<HTMLDivElement>(null);
+  const ownerAnalysisRef = useRef<HTMLDivElement>(null);
+  const providerChurnRef = useRef<HTMLDivElement>(null);
+  const ownerChurnRef = useRef<HTMLDivElement>(null);
+  const financialSummaryRef = useRef<HTMLDivElement>(null);
+  const revenueStreamsRef = useRef<HTMLDivElement>(null);
+  const cogsRef = useRef<HTMLDivElement>(null);
+  const fixedCostsRef = useRef<HTMLDivElement>(null);
+  const platformMetricsRef = useRef<HTMLDivElement>(null);
+  const platformSettingsRef = useRef<HTMLDivElement>(null);
+  const grossMarginTableRef = useRef<HTMLDivElement>(null);
+  const grossMarginChartRef = useRef<HTMLDivElement>(null);
+  const financialOverviewChartRef = useRef<HTMLDivElement>(null);
+
+  const downloadChart = async (ref: React.RefObject<HTMLDivElement>, filename: string) => {
+    if (ref.current) {
+      try {
+        const filter = (node: HTMLElement) => !node.hasAttribute?.('data-export-exclude');
+        const dataUrl = await toPng(ref.current, { 
+          backgroundColor: '#ffffff', 
+          quality: 1, 
+          pixelRatio: 2,
+          filter: filter as any 
+        });
+        const link = document.createElement('a');
+        link.download = `${filename}.png`;
+        link.href = dataUrl;
+        link.click();
+      } catch (err) {
+        console.error('oops, something went wrong!', err);
+      }
+    }
+  };
+
+  const copyChart = async (ref: React.RefObject<HTMLDivElement>, chartId: string) => {
+    if (ref.current) {
+      try {
+        const filter = (node: HTMLElement) => !node.hasAttribute?.('data-export-exclude');
+        const blob = await toBlob(ref.current, { 
+          backgroundColor: '#ffffff', 
+          quality: 1, 
+          pixelRatio: 2,
+          filter: filter as any
+        });
+        if (blob) {
+          await navigator.clipboard.write([
+            new ClipboardItem({ 'image/png': blob })
+          ]);
+          setCopiedChart(chartId);
+          setTimeout(() => setCopiedChart(null), 2000);
+        }
+      } catch (err) {
+        console.error('Failed to copy image:', err);
+      }
+    }
+  };
+
+  const MarketFlags = ({ market }: { market: Market }) => {
+    const flags = {
+      Portugal: [{ url: 'https://flagcdn.com/pt.svg', alt: 'Portugal' }],
+      UK: [{ url: 'https://flagcdn.com/gb.svg', alt: 'UK' }],
+      Aggregated: [
+        { url: 'https://flagcdn.com/pt.svg', alt: 'Portugal' },
+        { url: 'https://flagcdn.com/gb.svg', alt: 'UK' }
+      ]
+    };
+
+    return (
+      <div className="flex -space-x-2 items-center">
+        {flags[market].map((f, i) => (
+          <img 
+            key={i} 
+            src={f.url} 
+            alt={f.alt} 
+            className="w-6 h-6 rounded-full border-2 border-white shadow-sm object-cover"
+            referrerPolicy="no-referrer"
+          />
+        ))}
+      </div>
+    );
+  };
 
   const [markets, setMarkets] = useState<Record<'Portugal' | 'UK', MarketData>>(() => {
     const defaultMarketData = (): MarketData => ({
@@ -296,6 +380,26 @@ export default function App() {
     });
 
     const totalRevenueByYear = years.map(y => derivedRevenueStreams.reduce((sum, stream) => sum + (Number(stream.amounts[y]) || 0), 0));
+    const totalGrossRevenueByYear = years.map(y => {
+      const ownersStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-2' || s.name === 'Number of owners in the platform');
+      const bookingsPerOwnerStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-6' || s.name === '# of yearly bookings per pet owners');
+      const avgPriceStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-3' || s.name === 'Avg price per booking');
+      
+      const owners = Number(ownersStream?.amounts?.[y]) || 0;
+      const bookingsPerOwner = Number(bookingsPerOwnerStream?.amounts?.[y]) || 0;
+      const avgPrice = Number(avgPriceStream?.amounts?.[y]) || 0;
+      const chargeBook = chargeBookingFees[y] ? 1 : 0;
+      
+      const bookingVolume = owners * bookingsPerOwner * avgPrice * chargeBook;
+      
+      const subscriptionsRevenue = derivedRevenueStreams.find(s => s.name === 'Monthly Subscriptions')?.amounts?.[y] || 0;
+      const otherRevenue = derivedRevenueStreams
+        .filter(s => s.name !== 'Monthly Subscriptions' && s.name !== 'Booking Fees')
+        .reduce((sum, s) => sum + (Number(s.amounts[y]) || 0), 0);
+        
+      return bookingVolume + Number(subscriptionsRevenue) + otherRevenue;
+    });
+
     const totalVarCostsByYear = years.map(y => derivedVariableCostsStreams.reduce((sum, stream) => sum + (Number(stream.amounts[y]) || 0), 0));
     const totalFixedCostsByYear = years.map(y => fixedCostsStreams.reduce((sum, stream) => sum + (Number(stream.amounts[y]) || 0), 0));
     const totalPlatformMetricsByYear = years.map(y => derivedPlatformMetricsStreams.reduce((sum, stream) => sum + (Number(stream.amounts[y]) || 0), 0));
@@ -306,6 +410,7 @@ export default function App() {
     const opProfitPercentByYear = years.map(y => totalRevenueByYear[y] > 0 ? (opProfitByYear[y] / totalRevenueByYear[y]) * 100 : 0);
 
     const totalRevenue = totalRevenueByYear.reduce((a, b) => a + b, 0);
+    const totalGrossRevenue = totalGrossRevenueByYear.reduce((a, b) => a + b, 0);
     const totalVariableCosts = totalVarCostsByYear.reduce((a, b) => a + b, 0);
     const fixedCosts = totalFixedCostsByYear.reduce((a, b) => a + b, 0);
     const totalPlatformMetrics = totalPlatformMetricsByYear.reduce((a, b) => a + b, 0);
@@ -319,6 +424,7 @@ export default function App() {
       derivedRevenueStreams,
       derivedVariableCostsStreams,
       totalRevenueByYear,
+      totalGrossRevenueByYear,
       totalVarCostsByYear,
       totalFixedCostsByYear,
       totalPlatformMetricsByYear,
@@ -327,6 +433,7 @@ export default function App() {
       opProfitByYear,
       opProfitPercentByYear,
       totalRevenue,
+      totalGrossRevenue,
       totalVariableCosts,
       fixedCosts,
       totalPlatformMetrics,
@@ -355,6 +462,7 @@ export default function App() {
     derivedRevenueStreams,
     derivedVariableCostsStreams,
     totalRevenueByYear,
+    totalGrossRevenueByYear,
     totalVarCostsByYear,
     totalFixedCostsByYear,
     totalPlatformMetricsByYear,
@@ -363,6 +471,7 @@ export default function App() {
     opProfitByYear,
     opProfitPercentByYear,
     totalRevenue,
+    totalGrossRevenue,
     totalVariableCosts,
     fixedCosts,
     totalPlatformMetrics,
@@ -461,6 +570,7 @@ export default function App() {
       };
 
       const totalRevenueByYear = years.map(y => ptFin.totalRevenueByYear[y] + ukFin.totalRevenueByYear[y]);
+      const totalGrossRevenueByYear = years.map(y => (ptFin.totalGrossRevenueByYear?.[y] || 0) + (ukFin.totalGrossRevenueByYear?.[y] || 0));
       const totalVarCostsByYear = years.map(y => ptFin.totalVarCostsByYear[y] + ukFin.totalVarCostsByYear[y]);
       const totalFixedCostsByYear = years.map(y => ptFin.totalFixedCostsByYear[y] + ukFin.totalFixedCostsByYear[y]);
       const totalPlatformMetricsByYear = years.map(y => ptFin.totalPlatformMetricsByYear[y] + ukFin.totalPlatformMetricsByYear[y]);
@@ -468,6 +578,7 @@ export default function App() {
       const opProfitByYear = years.map(y => ptFin.opProfitByYear[y] + ukFin.opProfitByYear[y]);
 
       const totalRevenue = ptFin.totalRevenue + ukFin.totalRevenue;
+      const totalGrossRevenue = (ptFin.totalGrossRevenue || 0) + (ukFin.totalGrossRevenue || 0);
       const totalVariableCosts = ptFin.totalVariableCosts + ukFin.totalVariableCosts;
       const fixedCosts = ptFin.fixedCosts + ukFin.fixedCosts;
       const totalPlatformMetrics = ptFin.totalPlatformMetrics + ukFin.totalPlatformMetrics;
@@ -574,14 +685,16 @@ export default function App() {
 
   const chartData = [...years.map(y => ({
     name: `Year ${y + 1}`,
-    'Revenues': totalRevenueByYear[y],
+    'Gross Revenues': totalGrossRevenueByYear[y],
+    'Net Revenues': totalRevenueByYear[y],
     'COGS': totalVarCostsByYear[y],
     'Gross Margin': grossMarginByYear[y],
     'Fixed Costs': totalFixedCostsByYear[y],
     'Op. Profit': opProfitByYear[y]
   })), {
     name: 'Total',
-    'Revenues': totalRevenue,
+    'Gross Revenues': totalGrossRevenue,
+    'Net Revenues': totalRevenue,
     'COGS': totalVariableCosts,
     'Gross Margin': grossMargin,
     'Fixed Costs': fixedCosts,
@@ -913,7 +1026,7 @@ export default function App() {
       const revenueRowsCount = revenueUnion.length + 3;
       const cogsRowsCount = cogsUnion.length + 3;
       const fixedRowsCount = fixedUnion.length + 3;
-      const summaryRowsCount = 9; // 8 summary rows + 1 empty row
+      const summaryRowsCount = 10; // 9 summary rows + 1 empty row
       
       const breakdownStartRow = currentRow + revenueRowsCount + cogsRowsCount + fixedRowsCount + summaryRowsCount;
       const feePctRow = breakdownStartRow + 1;
@@ -1044,14 +1157,22 @@ export default function App() {
       // Summary
       rows.push(['Summary', 'Metric', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']); currentRow++;
       
-      // Revenues
+      // Gross Revenues
+      rows.push([
+        'Summary',
+        'Gross Revenues',
+        ...years.map(y => ({ f: `${getCellRef(2 + y, subVolRow)}+${getCellRef(2 + y, bookVolRow)}` })),
+        { f: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
+      ]); currentRow++;
+
+      // Net Revenues
       rows.push([
         'Summary', 
-        'Revenues', 
+        'Net Revenues', 
         ...years.map(y => ({ f: getCellRef(2 + y, revenueTotalRow) })),
         { f: getCellRef(7, revenueTotalRow) }
       ]); currentRow++;
-      
+
       // COGS
       rows.push([
         'Summary', 
@@ -1216,7 +1337,9 @@ export default function App() {
     totalsByYear: number[],
     stateKey: keyof MarketData,
     formatType: 'currency' | 'number' = 'currency',
-    showTotal: boolean = true
+    showTotal: boolean = true,
+    sectionRef?: React.RefObject<HTMLDivElement>,
+    downloadId?: string
   ) => {
     const formatValue = (val: number) => {
       if (formatType === 'currency') return formatCurrency(val);
@@ -1225,12 +1348,31 @@ export default function App() {
     const isReadOnly = activeMarket === 'Aggregated';
     
     return (
-    <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6">
+    <div ref={sectionRef} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6 relative group">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium flex items-center space-x-2">
-          <Activity className="w-5 h-5 text-slate-400" />
-          <span>{title}</span>
-        </h2>
+        <div className="flex items-center space-x-4">
+          <h2 className="text-lg font-medium flex items-center space-x-2">
+            <Activity className="w-5 h-5 text-slate-400" />
+            <span>{title}</span>
+          </h2>
+          <MarketFlags market={activeMarket} />
+          <div data-export-exclude="true" className="flex space-x-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+            <button 
+              onClick={() => copyChart(sectionRef!, downloadId!)}
+              className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+              title="Copy to Clipboard"
+            >
+              {copiedChart === downloadId ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+            </button>
+            <button 
+              onClick={() => downloadChart(sectionRef!, downloadId!)}
+              className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+              title="Download as PNG"
+            >
+              <Camera className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
         {!isReadOnly && (
           <button 
             onClick={() => addStream(streams, prefix, stateKey)}
@@ -1418,11 +1560,32 @@ export default function App() {
             {/* Inputs Section */}
             <div className="xl:col-span-7 space-y-6">
               {/* Summary Table */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                <h2 className="text-lg font-medium mb-4 flex items-center space-x-2">
-                  <Calculator className="w-5 h-5 text-indigo-600" />
-                  <span>Financial Summary ({activeMarket})</span>
-                </h2>
+              <div ref={financialSummaryRef} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative group">
+                <div className="flex justify-between items-start mb-4">
+                  <div className="flex items-center space-x-3">
+                    <h2 className="text-lg font-medium flex items-center space-x-2">
+                      <Calculator className="w-5 h-5 text-indigo-600" />
+                      <span>Financial Summary ({activeMarket})</span>
+                    </h2>
+                    <MarketFlags market={activeMarket} />
+                  </div>
+                  <div data-export-exclude="true" className="flex space-x-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                    <button 
+                      onClick={() => copyChart(financialSummaryRef, 'financial-summary')}
+                      className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                      title="Copy to Clipboard"
+                    >
+                      {copiedChart === 'financial-summary' ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                    </button>
+                    <button 
+                      onClick={() => downloadChart(financialSummaryRef, 'financial-summary')}
+                      className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                      title="Download as PNG"
+                    >
+                      <Camera className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
@@ -1435,8 +1598,15 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
+                      <tr className="border-b border-slate-50 bg-slate-50/20">
+                        <td className="py-2 px-2 font-medium text-slate-700 italic">Gross Revenues</td>
+                        {years.map(y => (
+                          <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-400 text-xs">{formatCurrency(totalGrossRevenueByYear[y])}</td>
+                        ))}
+                        <td className="text-right py-2 px-2 font-bold bg-slate-50/50 font-mono whitespace-nowrap text-slate-500 text-xs">{formatCurrency(totalGrossRevenue)}</td>
+                      </tr>
                       <tr className="border-b border-slate-50">
-                        <td className="py-2 px-2 font-medium text-slate-700">Revenues</td>
+                        <td className="py-2 px-2 font-medium text-slate-700">Net Revenues</td>
                         {years.map(y => (
                           <td key={y} className={`text-right py-2 px-2 font-mono whitespace-nowrap ${totalRevenueByYear[y] >= 0 ? 'text-slate-600' : 'text-red-600'}`}>{formatCurrency(totalRevenueByYear[y])}</td>
                         ))}
@@ -1501,9 +1671,9 @@ export default function App() {
                 </div>
               </div>
 
-              {renderStreamSection('Revenue Streams', derivedRevenueStreams, 'Revenue', totalRevenue, totalRevenueByYear, 'revenueStreams')}
-              {renderStreamSection('COGS', derivedVariableCostsStreams, 'Cost', totalVariableCosts, totalVarCostsByYear, 'variableCostsStreams')}
-              {renderStreamSection('Fixed Operating Costs', fixedCostsStreams, 'Fixed Cost', fixedCosts, totalFixedCostsByYear, 'fixedCostsStreams')}
+              {renderStreamSection('Revenue Streams', derivedRevenueStreams, 'Revenue', totalRevenue, totalRevenueByYear, 'revenueStreams', 'currency', true, revenueStreamsRef, 'revenue-streams')}
+              {renderStreamSection('COGS', derivedVariableCostsStreams, 'Cost', totalVariableCosts, totalVarCostsByYear, 'variableCostsStreams', 'currency', true, cogsRef, 'cogs-streams')}
+              {renderStreamSection('Fixed Operating Costs', fixedCostsStreams, 'Fixed Cost', fixedCosts, totalFixedCostsByYear, 'fixedCostsStreams', 'currency', true, fixedCostsRef, 'fixed-costs-streams')}
             </div>
 
             {/* Outputs & Visualization Section */}
@@ -1566,8 +1736,29 @@ export default function App() {
             </div>
 
             {/* Chart Section */}
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-              <h2 className="text-lg font-medium mb-6">5-Year Financial Overview</h2>
+            <div ref={financialOverviewChartRef} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 relative group">
+              <div className="flex justify-between items-start mb-6">
+                <div className="flex items-center space-x-3">
+                  <h2 className="text-lg font-medium">5-Year Financial Overview</h2>
+                  <MarketFlags market={activeMarket} />
+                </div>
+                <div data-export-exclude="true" className="flex space-x-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                  <button 
+                    onClick={() => copyChart(financialOverviewChartRef, 'financial-overview')}
+                    className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                    title="Copy to Clipboard"
+                  >
+                    {copiedChart === 'financial-overview' ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                  </button>
+                  <button 
+                    onClick={() => downloadChart(financialOverviewChartRef, 'financial-overview')}
+                    className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                    title="Download as PNG"
+                  >
+                    <Camera className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
               <div className="h-96 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
@@ -1600,7 +1791,7 @@ export default function App() {
                       wrapperStyle={{ paddingLeft: '20px' }}
                       content={(props) => {
                         const { payload } = props;
-                        const order = ['Revenues', 'COGS', 'Gross Margin', 'Fixed Costs', 'Op. Profit'];
+                        const order = ['Net Revenues', 'COGS', 'Gross Margin', 'Fixed Costs', 'Op. Profit'];
                         const sortedPayload = order.map(name => payload?.find((p: any) => p.value === name)).filter(Boolean);
                         
                         return (
@@ -1615,8 +1806,8 @@ export default function App() {
                         );
                       }}
                     />
-                    <Bar dataKey="Revenues" fill="#3b82f6">
-                      <LabelList dataKey="Revenues" content={renderCustomBarLabel} />
+                    <Bar dataKey="Net Revenues" fill="#3b82f6">
+                      <LabelList dataKey="Net Revenues" content={renderCustomBarLabel} />
                     </Bar>
                     <Bar dataKey="COGS" fill="#f59e0b">
                       <LabelList dataKey="COGS" content={renderCustomBarLabel} />
@@ -1642,13 +1833,34 @@ export default function App() {
           <div className="space-y-8">
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
               <div className="xl:col-span-7 space-y-6">
-                {renderStreamSection('Platform Metrics', platformMetricsStreams, 'Metric', totalPlatformMetrics, totalPlatformMetricsByYear, 'platformMetricsStreams', 'number', false)}
+                {renderStreamSection('Platform Metrics', platformMetricsStreams, 'Metric', totalPlatformMetrics, totalPlatformMetricsByYear, 'platformMetricsStreams', 'number', false, platformMetricsRef, 'platform-metrics')}
                 
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6">
-                  <h2 className="text-lg font-medium flex items-center space-x-2">
-                    <Activity className="w-5 h-5 text-slate-400" />
-                    <span>Platform Settings</span>
-                  </h2>
+                <div ref={platformSettingsRef} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6 relative group">
+                  <div className="flex justify-between items-start">
+                    <div className="flex items-center space-x-3">
+                      <h2 className="text-lg font-medium flex items-center space-x-2">
+                        <Activity className="w-5 h-5 text-slate-400" />
+                        <span>Platform Settings</span>
+                      </h2>
+                      <MarketFlags market={activeMarket} />
+                    </div>
+                    <div data-export-exclude="true" className="flex space-x-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                      <button 
+                        onClick={() => copyChart(platformSettingsRef, 'platform-settings')}
+                        className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                        title="Copy to Clipboard"
+                      >
+                        {copiedChart === 'platform-settings' ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                      <button 
+                        onClick={() => downloadChart(platformSettingsRef, 'platform-settings')}
+                        className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                        title="Download as PNG"
+                      >
+                        <Camera className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
                   
                   <div className="space-y-4">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100 space-y-4 sm:space-y-0 sm:space-x-4">
@@ -1706,52 +1918,82 @@ export default function App() {
 
               <div className="xl:col-span-5 space-y-6">
                 {/* Provider Analysis Chart */}
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                  <h2 className="text-lg font-medium mb-6">Provider Analysis</h2>
+                <div ref={providerAnalysisRef} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 relative group">
+                  <div className="flex justify-between items-start mb-6">
+                    <div className="flex items-center space-x-3">
+                      <h2 className="text-lg font-medium">Provider Analysis</h2>
+                      <MarketFlags market={activeMarket} />
+                    </div>
+                    <div data-export-exclude="true" className="flex space-x-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                      <button 
+                        onClick={() => copyChart(providerAnalysisRef, 'provider-analysis')}
+                        className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                        title="Copy to Clipboard"
+                      >
+                        {copiedChart === 'provider-analysis' ? <Check className="w-5 h-5 text-green-500" /> : <Copy className="w-5 h-5" />}
+                      </button>
+                      <button 
+                        onClick={() => downloadChart(providerAnalysisRef, 'provider-analysis')}
+                        className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                        title="Download as PNG"
+                      >
+                        <Camera className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
                   <div className="h-80 w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={platformChartData}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
-                        <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
-                        <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(val) => `${val}%`} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
                         <Tooltip 
                           contentStyle={{ borderRadius: '0.75rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                          formatter={(value, name) => {
-                            if (name === 'Provider Churn') return [`${value}%`, name];
-                            return [value, name];
-                          }}
                         />
                         <Legend verticalAlign="top" height={36}/>
-                        <Line yAxisId="left" type="monotone" dataKey="Total Providers" stroke="#0ea5e9" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                        <Line yAxisId="left" type="monotone" dataKey="New Providers" stroke="#7dd3fc" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
-                        <Line yAxisId="right" type="monotone" dataKey="Provider Churn" stroke="#f59e0b" strokeWidth={3} strokeDasharray="1 5" dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                        <Line type="monotone" dataKey="Total Providers" stroke="#0ea5e9" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                        <Line type="monotone" dataKey="New Providers" stroke="#7dd3fc" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
                 </div>
 
                 {/* Owner Analysis Chart */}
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                  <h2 className="text-lg font-medium mb-6">Owner Analysis</h2>
+                <div ref={ownerAnalysisRef} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 relative group">
+                  <div className="flex justify-between items-start mb-6">
+                    <div className="flex items-center space-x-3">
+                      <h2 className="text-lg font-medium">Owner Analysis</h2>
+                      <MarketFlags market={activeMarket} />
+                    </div>
+                    <div data-export-exclude="true" className="flex space-x-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                      <button 
+                        onClick={() => copyChart(ownerAnalysisRef, 'owner-analysis')}
+                        className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                        title="Copy to Clipboard"
+                      >
+                        {copiedChart === 'owner-analysis' ? <Check className="w-5 h-5 text-green-500" /> : <Copy className="w-5 h-5" />}
+                      </button>
+                      <button 
+                        onClick={() => downloadChart(ownerAnalysisRef, 'owner-analysis')}
+                        className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                        title="Download as PNG"
+                      >
+                        <Camera className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
                   <div className="h-80 w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={platformChartData}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
-                        <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
-                        <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(val) => `${val}%`} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
                         <Tooltip 
                           contentStyle={{ borderRadius: '0.75rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                          formatter={(value, name) => {
-                            if (name === 'Owner Churn') return [`${value}%`, name];
-                            return [value, name];
-                          }}
                         />
                         <Legend verticalAlign="top" height={36}/>
-                        <Line yAxisId="left" type="monotone" dataKey="Total Owners" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                        <Line yAxisId="left" type="monotone" dataKey="New Owners" stroke="#6ee7b7" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
-                        <Line yAxisId="right" type="monotone" dataKey="Owner Churn" stroke="#6366f1" strokeWidth={3} strokeDasharray="1 5" dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                        <Line type="monotone" dataKey="Total Owners" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                        <Line type="monotone" dataKey="New Owners" stroke="#6ee7b7" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
@@ -1759,11 +2001,32 @@ export default function App() {
 
                 {/* Independent Churn Trend Charts */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
-                    <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 flex items-center space-x-2">
-                      <div className="w-2 h-2 rounded-full bg-[#f59e0b]"></div>
-                      <span>Provider Churn Trend</span>
-                    </h2>
+                  <div ref={providerChurnRef} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 relative group">
+                    <div className="flex justify-between items-start mb-4">
+                      <div className="flex items-center space-x-3">
+                        <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center space-x-2">
+                          <div className="w-2 h-2 rounded-full bg-[#f59e0b]"></div>
+                          <span>Provider Churn Trend</span>
+                        </h2>
+                        <MarketFlags market={activeMarket} />
+                      </div>
+                      <div data-export-exclude="true" className="flex space-x-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                        <button 
+                          onClick={() => copyChart(providerChurnRef, 'provider-churn-trend')}
+                          className="p-1.5 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                          title="Copy to Clipboard"
+                        >
+                          {copiedChart === 'provider-churn-trend' ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                        </button>
+                        <button 
+                          onClick={() => downloadChart(providerChurnRef, 'provider-churn-trend')}
+                          className="p-1.5 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                          title="Download as PNG"
+                        >
+                          <Camera className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
                     <div className="h-32 w-full">
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={platformChartData}>
@@ -1780,11 +2043,32 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
-                    <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 flex items-center space-x-2">
-                      <div className="w-2 h-2 rounded-full bg-[#6366f1]"></div>
-                      <span>Owner Churn Trend</span>
-                    </h2>
+                  <div ref={ownerChurnRef} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 relative group">
+                    <div className="flex justify-between items-start mb-4">
+                      <div className="flex items-center space-x-3">
+                        <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center space-x-2">
+                          <div className="w-2 h-2 rounded-full bg-[#6366f1]"></div>
+                          <span>Owner Churn Trend</span>
+                        </h2>
+                        <MarketFlags market={activeMarket} />
+                      </div>
+                      <div data-export-exclude="true" className="flex space-x-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                        <button 
+                          onClick={() => copyChart(ownerChurnRef, 'owner-churn-trend')}
+                          className="p-1.5 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                          title="Copy to Clipboard"
+                        >
+                          {copiedChart === 'owner-churn-trend' ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                        </button>
+                        <button 
+                          onClick={() => downloadChart(ownerChurnRef, 'owner-churn-trend')}
+                          className="p-1.5 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                          title="Download as PNG"
+                        >
+                          <Camera className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
                     <div className="h-32 w-full">
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={platformChartData}>
@@ -1808,11 +2092,32 @@ export default function App() {
 
         {activeTab === 'gross-margin' && (
           <div className="space-y-8">
-            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-              <h2 className="text-xl font-semibold mb-6 flex items-center space-x-2">
-                <Percent className="w-6 h-6 text-indigo-600" />
-                <span>5-Year Gross Margin Analysis</span>
-              </h2>
+            <div ref={grossMarginTableRef} className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative group">
+              <div className="flex justify-between items-start mb-6">
+                <div className="flex items-center space-x-3">
+                  <h2 className="text-xl font-semibold flex items-center space-x-2">
+                    <Percent className="w-6 h-6 text-indigo-600" />
+                    <span>5-Year Gross Margin Analysis</span>
+                  </h2>
+                  <MarketFlags market={activeMarket} />
+                </div>
+                <div data-export-exclude="true" className="flex space-x-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                  <button 
+                    onClick={() => copyChart(grossMarginTableRef, 'gross-margin-table')}
+                    className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                    title="Copy to Clipboard"
+                  >
+                    {copiedChart === 'gross-margin-table' ? <Check className="w-5 h-5 text-green-500" /> : <Copy className="w-5 h-5" />}
+                  </button>
+                  <button 
+                    onClick={() => downloadChart(grossMarginTableRef, 'gross-margin-table')}
+                    className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                    title="Download as PNG"
+                  >
+                    <Camera className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
               
               <div className="overflow-x-auto -mx-8 px-8">
                 <table className="w-full min-w-[800px]">
@@ -1853,8 +2158,29 @@ export default function App() {
               </div>
             </div>
 
-            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200">
-              <h2 className="text-lg font-medium mb-6">Gross Margin % Trend</h2>
+            <div ref={grossMarginChartRef} className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 relative group">
+              <div className="flex justify-between items-start mb-6">
+                <div className="flex items-center space-x-3">
+                  <h2 className="text-lg font-medium">Gross Margin % Trend</h2>
+                  <MarketFlags market={activeMarket} />
+                </div>
+                <div data-export-exclude="true" className="flex space-x-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                  <button 
+                    onClick={() => copyChart(grossMarginChartRef, 'gross-margin-trend')}
+                    className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                    title="Copy to Clipboard"
+                  >
+                    {copiedChart === 'gross-margin-trend' ? <Check className="w-5 h-5 text-green-500" /> : <Copy className="w-5 h-5" />}
+                  </button>
+                  <button 
+                    onClick={() => downloadChart(grossMarginChartRef, 'gross-margin-trend')}
+                    className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                    title="Download as PNG"
+                  >
+                    <Camera className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
               <div className="h-80 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
