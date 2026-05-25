@@ -3,6 +3,8 @@ import { Calculator, DollarSign, TrendingUp, Activity, Plus, Trash2, Percent, Do
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LabelList, Legend } from 'recharts';
 import * as XLSX from 'xlsx';
 import { toPng, toBlob } from 'html-to-image';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 
 interface FinancialStream {
   id: string;
@@ -37,7 +39,9 @@ const DEFAULT_PLATFORM_METRICS: FinancialStream[] = [
   { id: 'pm-cac-providers', name: 'Unit CAC - Providers', amounts: ['', '', '', '', ''], isPermanent: true },
   { id: 'pm-cac-owners', name: 'Unit CAC - Owners', amounts: ['', '', '', '', ''], isPermanent: true },
   { id: 'pm-cs-providers', name: 'Unit Customer Support cost - Providers', amounts: ['', '', '', '', ''], isPermanent: true },
-  { id: 'pm-cs-owners', name: 'Unit Customer Support cost - Owners', amounts: ['', '', '', '', ''], isPermanent: true }
+  { id: 'pm-cs-owners', name: 'Unit Customer Support cost - Owners', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'pm-payment-fee-percent', name: 'Payment Fee %', amounts: [2.9, 2.9, 2.9, 2.9, 2.9], isPermanent: true },
+  { id: 'pm-payment-fee-per-tx', name: 'Payment Fee per Transaction', amounts: [0.30, 0.30, 0.30, 0.30, 0.30], isPermanent: true }
 ];
 
 const DEFAULT_REVENUE_STREAMS: FinancialStream[] = [
@@ -79,6 +83,7 @@ export default function App() {
   const grossMarginTableRef = useRef<HTMLDivElement>(null);
   const grossMarginChartRef = useRef<HTMLDivElement>(null);
   const financialOverviewChartRef = useRef<HTMLDivElement>(null);
+  const viabilityComparisonChartRef = useRef<HTMLDivElement>(null);
 
   const downloadChart = async (ref: React.RefObject<HTMLDivElement>, filename: string) => {
     if (ref.current) {
@@ -320,6 +325,8 @@ export default function App() {
         const ownersStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-2' || s.name === 'Number of owners in the platform');
         const bookingsPerOwnerStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-6' || s.name === '# of yearly bookings per pet owners');
         const avgPriceStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-3' || s.name === 'Avg price per booking');
+        const paymentFeePctStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-payment-fee-percent' || s.name === 'Payment Fee %');
+        const paymentFeePerTxStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-payment-fee-per-tx' || s.name === 'Payment Fee per Transaction');
         
         const amounts = years.map(y => {
           const providers = Number(providersStream?.amounts?.[y]) || 0;
@@ -338,7 +345,13 @@ export default function App() {
           const totalTransactions = subTransactions + bookingTransactions;
           const totalVolume = subVolume + bookingVolume;
 
-          const cost = (totalVolume * 0.029) + (totalTransactions * 0.30);
+          const feePctVal = paymentFeePctStream?.amounts?.[y];
+          const feePct = (feePctVal !== undefined && feePctVal !== '') ? Number(feePctVal) / 100 : 0.029;
+
+          const feePerTxVal = paymentFeePerTxStream?.amounts?.[y];
+          const feePerTx = (feePerTxVal !== undefined && feePerTxVal !== '') ? Number(feePerTxVal) : 0.30;
+
+          const cost = (totalVolume * feePct) + (totalTransactions * feePerTx);
           return cost;
         });
         return { ...stream, amounts, isCalculated: true };
@@ -578,7 +591,7 @@ export default function App() {
       const opProfitByYear = years.map(y => ptFin.opProfitByYear[y] + ukFin.opProfitByYear[y]);
 
       const totalRevenue = ptFin.totalRevenue + ukFin.totalRevenue;
-      const totalGrossRevenue = (ptFin.totalGrossRevenue || 0) + (ukFin.totalGrossRevenue || 0);
+      const totalGrossRevenue = ptFin.totalGrossRevenue + ukFin.totalGrossRevenue;
       const totalVariableCosts = ptFin.totalVariableCosts + ukFin.totalVariableCosts;
       const fixedCosts = ptFin.fixedCosts + ukFin.fixedCosts;
       const totalPlatformMetrics = ptFin.totalPlatformMetrics + ukFin.totalPlatformMetrics;
@@ -600,6 +613,7 @@ export default function App() {
         chargeSubscription: ptFin.chargeSubscription.map((v, i) => v || ukFin.chargeSubscription[i]),
         chargeBookingFees: ptFin.chargeBookingFees.map((v, i) => v || ukFin.chargeBookingFees[i]),
         totalRevenueByYear,
+        totalGrossRevenueByYear,
         totalVarCostsByYear,
         totalFixedCostsByYear,
         totalPlatformMetricsByYear,
@@ -608,6 +622,7 @@ export default function App() {
         opProfitByYear,
         opProfitPercentByYear,
         totalRevenue,
+        totalGrossRevenue,
         totalVariableCosts,
         fixedCosts,
         totalPlatformMetrics,
@@ -701,6 +716,28 @@ export default function App() {
     'Op. Profit': operatingProfit
   }];
 
+  const viabilityChartData = React.useMemo(() => {
+    return [
+      ...years.map(y => {
+        const retailSales = totalGrossRevenueByYear[y] || 0;
+        const operatingCosts = (totalVarCostsByYear[y] || 0) + (totalFixedCostsByYear[y] || 0);
+        const operatingProfit = opProfitByYear[y] || 0;
+        return {
+          name: `Year ${y + 1}`,
+          'Retail Sales': retailSales,
+          'Operating Costs': operatingCosts,
+          'Operating Profit': operatingProfit,
+        };
+      }),
+      {
+        name: 'Total',
+        'Retail Sales': totalGrossRevenue || 0,
+        'Operating Costs': (totalVariableCosts || 0) + (fixedCosts || 0),
+        'Operating Profit': operatingProfit || 0,
+      }
+    ];
+  }, [years, totalGrossRevenueByYear, totalVarCostsByYear, totalFixedCostsByYear, opProfitByYear, totalGrossRevenue, totalVariableCosts, fixedCosts, operatingProfit]);
+
   const platformChartData = years.map(y => {
     const getVal = (name: string) => {
       const stream = platformMetricsStreams.find(s => s.name === name);
@@ -787,14 +824,43 @@ export default function App() {
 
   const getStreamTotal = (stream: FinancialStream) => stream.amounts.reduce((sum, val) => (sum as number) + (Number(val) || 0), 0) as number;
 
-  const exportToXLSX = () => {
-    const wb = XLSX.utils.book_new();
+  const exportToXLSX = async () => {
+    // 1. Capture charts
+    const capturedImages: { name: string, data: string }[] = [];
+    const filter = (node: HTMLElement) => !node.hasAttribute?.('data-export-exclude');
+    
+    const chartRefs = [
+      { ref: financialOverviewChartRef, name: 'Financial Overview' },
+      { ref: viabilityComparisonChartRef, name: 'Financial Viability Comparison' },
+      { ref: providerAnalysisRef, name: 'Provider Analysis' },
+      { ref: ownerAnalysisRef, name: 'Owner Analysis' },
+      { ref: providerChurnRef, name: 'Provider Churn Trend' },
+      { ref: ownerChurnRef, name: 'Owner Churn Trend' },
+      { ref: grossMarginChartRef, name: 'Gross Margin Trend' }
+    ];
+
+    for (const item of chartRefs) {
+      if (item.ref?.current) {
+        try {
+          const dataUrl = await toPng(item.ref.current, { 
+            backgroundColor: '#ffffff', 
+            quality: 0.8,
+            pixelRatio: 1.5,
+            filter: filter as any
+          });
+          capturedImages.push({ name: item.name, data: dataUrl });
+        } catch (err) {
+          console.error(`Failed to capture ${item.name}:`, err);
+        }
+      }
+    }
+
+    const workbook = new ExcelJS.Workbook();
     const marketsToExport: Market[] = ['Portugal', 'UK', 'Aggregated'];
 
     const getColLetter = (col: number) => String.fromCharCode(65 + col);
     const getCellRef = (col: number, row: number) => `${getColLetter(col)}${row + 1}`;
 
-    // Get union of all streams to ensure consistent row structure across sheets
     const ptFin = { ...markets.Portugal, ...calculateFinancials(markets.Portugal) };
     const ukFin = { ...markets.UK, ...calculateFinancials(markets.UK) };
 
@@ -816,14 +882,15 @@ export default function App() {
     const fixedUnion = getUnion(ptFin.fixedCostsStreams, ukFin.fixedCostsStreams, DEFAULT_FIXED_COSTS_STREAMS);
 
     marketsToExport.forEach(market => {
-      const rows: any[][] = [];
+      const sheet = workbook.addWorksheet(market);
       let currentRow = 0;
 
       // Header
-      rows.push([`Market: ${market}`]); currentRow++;
-      rows.push([]); currentRow++;
-      rows.push(['Category', 'Stream Name', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']); currentRow++;
-      const headerRow = currentRow - 1;
+      sheet.addRow([`Market: ${market}`]); currentRow++;
+      sheet.getRow(currentRow).font = { bold: true, size: 14 };
+      sheet.addRow([]); currentRow++;
+      sheet.addRow(['Category', 'Stream Name', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']); currentRow++;
+      sheet.getRow(currentRow).font = { bold: true };
 
       const getStreamValue = (marketName: Market, category: string, streamName: string, yearIdx: number) => {
         const mData = marketName === 'Portugal' ? ptFin : ukFin;
@@ -839,13 +906,8 @@ export default function App() {
 
       // Platform Metrics
       const metricRowMap: Record<string, number> = {};
-      let tempRow = currentRow;
       platformUnion.forEach(name => {
-        metricRowMap[name] = tempRow;
-        tempRow++;
-      });
-
-      platformUnion.forEach(name => {
+        metricRowMap[name] = currentRow;
         const rowData: any[] = ['Platform Metric', name];
         years.forEach(y => {
           if (market === 'Aggregated') {
@@ -859,7 +921,9 @@ export default function App() {
               'Unit Customer Support cost - Providers',
               'Unit Customer Support cost - Owners',
               'Provider churn rate (%)',
-              'Owner churn rate (%)'
+              'Owner churn rate (%)',
+              'Payment Fee %',
+              'Payment Fee per Transaction'
             ];
 
             if (weightedMetrics.includes(name)) {
@@ -877,81 +941,59 @@ export default function App() {
                 if (oRow !== undefined && bRow !== undefined && aRow !== undefined) {
                   wPt = `'Portugal'!${col}${oRow+1}*'Portugal'!${col}${bRow+1}*'Portugal'!${col}${aRow+1}`;
                   wUk = `'UK'!${col}${oRow+1}*'UK'!${col}${bRow+1}*'UK'!${col}${aRow+1}`;
-                } else {
-                  wPt = "0";
-                  wUk = "0";
-                }
+                } else { wPt = "0"; wUk = "0"; }
               } else if (name === 'Avg price per booking') {
                 const oRow = metricRowMap['Number of owners in the platform'];
                 const bRow = metricRowMap['# of yearly bookings per pet owners'];
                 if (oRow !== undefined && bRow !== undefined) {
                   wPt = `'Portugal'!${col}${oRow+1}*'Portugal'!${col}${bRow+1}`;
                   wUk = `'UK'!${col}${oRow+1}*'UK'!${col}${bRow+1}`;
-                } else {
-                  wPt = "0";
-                  wUk = "0";
-                }
+                } else { wPt = "0"; wUk = "0"; }
               } else if (name === 'Monthly Subscription fee' || name === 'Unit Customer Support cost - Providers') {
                 const wRow = metricRowMap['Number of providers in the platform'];
                 if (wRow !== undefined) {
                   wPt = `'Portugal'!${col}${wRow+1}`;
                   wUk = `'UK'!${col}${wRow+1}`;
-                } else {
-                  wPt = "0";
-                  wUk = "0";
-                }
+                } else { wPt = "0"; wUk = "0"; }
               } else if (name === '# of yearly bookings per pet owners' || name === 'Unit Customer Support cost - Owners') {
                 const wRow = metricRowMap['Number of owners in the platform'];
                 if (wRow !== undefined) {
                   wPt = `'Portugal'!${col}${wRow+1}`;
                   wUk = `'UK'!${col}${wRow+1}`;
-                } else {
-                  wPt = "0";
-                  wUk = "0";
-                }
+                } else { wPt = "0"; wUk = "0"; }
               } else if (name === 'Unit CAC - Providers') {
                 const wRow = metricRowMap['New providers added'];
                 if (wRow !== undefined) {
                   wPt = `'Portugal'!${col}${wRow+1}`;
                   wUk = `'UK'!${col}${wRow+1}`;
-                } else {
-                  wPt = "0";
-                  wUk = "0";
-                }
+                } else { wPt = "0"; wUk = "0"; }
               } else if (name === 'Unit CAC - Owners') {
                 const wRow = metricRowMap['New owners added'];
                 if (wRow !== undefined) {
                   wPt = `'Portugal'!${col}${wRow+1}`;
                   wUk = `'UK'!${col}${wRow+1}`;
-                } else {
-                  wPt = "0";
-                  wUk = "0";
-                }
+                } else { wPt = "0"; wUk = "0"; }
               } else if (name === 'Provider churn rate (%)') {
                 const wRow = metricRowMap['Number of providers in the platform'];
                 if (wRow !== undefined) {
                   const prevCol = y > 0 ? getColLetter(1 + y) : col;
                   wPt = `'Portugal'!${prevCol}${wRow+1}`;
                   wUk = `'UK'!${prevCol}${wRow+1}`;
-                } else {
-                  wPt = "0";
-                  wUk = "0";
-                }
+                } else { wPt = "0"; wUk = "0"; }
               } else if (name === 'Owner churn rate (%)') {
                 const wRow = metricRowMap['Number of owners in the platform'];
                 if (wRow !== undefined) {
                   const prevCol = y > 0 ? getColLetter(1 + y) : col;
                   wPt = `'Portugal'!${prevCol}${wRow+1}`;
                   wUk = `'UK'!${prevCol}${wRow+1}`;
-                } else {
-                  wPt = "0";
-                  wUk = "0";
-                }
+                } else { wPt = "0"; wUk = "0"; }
+              } else if (name === 'Payment Fee %' || name === 'Payment Fee per Transaction') {
+                wPt = "1";
+                wUk = "1";
               }
-
-              rowData.push({ f: `IF((${wPt}+${wUk})>0, (${vPt}*${wPt} + ${vUk}*${wUk})/(${wPt}+${wUk}), 0)` });
+              rowData.push({ formula: `IF((${wPt}+${wUk})>0, (${vPt}*${wPt} + ${vUk}*${wUk})/(${wPt}+${wUk}), 0)` });
             } else {
-              rowData.push({ f: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` });
+              rowData.push({ formula: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` });
             }
           } else {
             const val = getStreamValue(market as Market, 'Platform Metric', name, y);
@@ -964,10 +1006,8 @@ export default function App() {
                 const newRef = `${col}${newRow+1}`;
                 const churnRef = `${col}${churnRow+1}`;
                 const prevRef = prevCol ? `${prevCol}${currentRow+1}` : "0";
-                rowData.push({ f: `ROUND(${prevRef} * (1 - ${churnRef}/100) + ${newRef}, 0)` });
-              } else {
-                rowData.push(val);
-              }
+                rowData.push({ formula: `ROUND(${prevRef} * (1 - ${churnRef}/100) + ${newRef}, 0)` });
+              } else { rowData.push(val); }
             } else if (name === 'Number of owners in the platform') {
               const newRow = metricRowMap['New owners added'];
               const churnRow = metricRowMap['Owner churn rate (%)'];
@@ -977,19 +1017,20 @@ export default function App() {
                 const newRef = `${col}${newRow+1}`;
                 const churnRef = `${col}${churnRow+1}`;
                 const prevRef = prevCol ? `${prevCol}${currentRow+1}` : "0";
-                rowData.push({ f: `ROUND(${prevRef} * (1 - ${churnRef}/100) + ${newRef}, 0)` });
-              } else {
-                rowData.push(val);
-              }
+                rowData.push({ formula: `ROUND(${prevRef} * (1 - ${churnRef}/100) + ${newRef}, 0)` });
+              } else { rowData.push(val); }
             } else if (name.includes('%')) {
               rowData.push(val / 100);
-            } else {
-              rowData.push(val);
-            }
+            } else { rowData.push(val); }
           }
         });
-        // No total for platform metrics
-        rows.push(rowData);
+        sheet.addRow(rowData);
+        const addedRow = sheet.getRow(currentRow + 1);
+        if (name.includes('%') || name.includes('rate')) {
+          for (let i = 3; i <= 7; i++) {
+            addedRow.getCell(i).numFmt = '0.0%';
+          }
+        }
         currentRow++;
       });
 
@@ -999,310 +1040,335 @@ export default function App() {
       const bookingsPerOwnerRow = metricRowMap['# of yearly bookings per pet owners'];
       const avgPriceRow = metricRowMap['Avg price per booking'];
 
-      // No total row for platform metrics
-      rows.push([]); currentRow++;
+      sheet.addRow([]); currentRow++;
 
       // Platform Settings
-      rows.push(['Platform Settings', 'Setting', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5']); currentRow++;
-      const chargeSubRow = currentRow;
+      sheet.addRow(['Platform Settings', 'Setting', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5']); currentRow++;
+      sheet.getRow(currentRow).font = { bold: true };
+      
+      const chargeSubRowIdx = currentRow;
       const ptSub = markets.Portugal.chargeSubscription;
       const ukSub = markets.UK.chargeSubscription;
-      rows.push(['Platform Setting', 'Charge Subscription', ...years.map(y => {
-        if (market === 'Aggregated') return { f: `MAX('Portugal'!${getCellRef(2 + y, currentRow)}, 'UK'!${getCellRef(2 + y, currentRow)})` };
+      sheet.addRow(['Platform Setting', 'Charge Subscription', ...years.map(y => {
+        if (market === 'Aggregated') return { formula: `MAX('Portugal'!${getCellRef(2 + y, chargeSubRowIdx)}, 'UK'!${getCellRef(2 + y, chargeSubRowIdx)})` };
         return (market === 'Portugal' ? ptSub[y] : ukSub[y]) ? 1 : 0;
       })]); currentRow++;
       
-      const chargeBookingRow = currentRow;
+      const chargeBookingRowIdx = currentRow;
       const ptBook = markets.Portugal.chargeBookingFees;
       const ukBook = markets.UK.chargeBookingFees;
-      rows.push(['Platform Setting', 'Charge Booking Fees', ...years.map(y => {
-        if (market === 'Aggregated') return { f: `MAX('Portugal'!${getCellRef(2 + y, currentRow)}, 'UK'!${getCellRef(2 + y, currentRow)})` };
+      sheet.addRow(['Platform Setting', 'Charge Booking Fees', ...years.map(y => {
+        if (market === 'Aggregated') return { formula: `MAX('Portugal'!${getCellRef(2 + y, chargeBookingRowIdx)}, 'UK'!${getCellRef(2 + y, chargeBookingRowIdx)})` };
         return (market === 'Portugal' ? ptBook[y] : ukBook[y]) ? 1 : 0;
       })]); currentRow++;
 
-      rows.push([]); currentRow++;
+      sheet.addRow([]); currentRow++;
 
-      // Calculate row indices for Payment Processing Breakdown (which will be at the end)
       const revenueRowsCount = revenueUnion.length + 3;
       const cogsRowsCount = cogsUnion.length + 3;
       const fixedRowsCount = fixedUnion.length + 3;
-      const summaryRowsCount = 10; // 9 summary rows + 1 empty row
+      const summaryRowsCount = 10;
       
-      const breakdownStartRow = currentRow + revenueRowsCount + cogsRowsCount + fixedRowsCount + summaryRowsCount;
-      const feePctRow = breakdownStartRow + 1;
-      const feeFixedRow = breakdownStartRow + 2;
-      const subVolRow = breakdownStartRow + 3;
-      const bookVolRow = breakdownStartRow + 4;
-      const subTransRow = breakdownStartRow + 5;
-      const bookTransRow = breakdownStartRow + 6;
+      const breakdownStartRowIdx = currentRow + revenueRowsCount + cogsRowsCount + fixedRowsCount + summaryRowsCount;
+      const feePctRowIdx = breakdownStartRowIdx + 1;
+      const feeFixedRowIdx = breakdownStartRowIdx + 2;
+      const subVolRowIdx = breakdownStartRowIdx + 3;
+      const bookVolRowIdx = breakdownStartRowIdx + 4;
+      const subTransRowIdx = breakdownStartRowIdx + 5;
+      const bookTransRowIdx = breakdownStartRowIdx + 6;
 
       // Revenue Streams
-      rows.push(['Category', 'Stream Name', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']); currentRow++;
-      const revenueStartRow = currentRow;
+      sheet.addRow(['Category', 'Stream Name', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']); currentRow++;
+      sheet.getRow(currentRow).font = { bold: true };
+      const revenueStartRowIdx = currentRow;
       revenueUnion.forEach(name => {
         const rowData: any[] = ['Revenue', name];
         if (market === 'Aggregated') {
-          years.forEach(y => rowData.push({ f: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }));
+          years.forEach(y => rowData.push({ formula: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }));
         } else if (name === 'Monthly Subscriptions') {
-          years.forEach(y => rowData.push({ f: `${getCellRef(2 + y, providersRow)}*${getCellRef(2 + y, subFeeRow)}*${getCellRef(2 + y, chargeSubRow)}*12` }));
+          years.forEach(y => rowData.push({ formula: `${getCellRef(2 + y, providersRow)}*${getCellRef(2 + y, subFeeRow)}*${getCellRef(2 + y, chargeSubRowIdx)}*12` }));
         } else if (name === 'Booking Fees') {
           const commissionRow = metricRowMap['% of bookings commission'];
-          years.forEach(y => rowData.push({ f: `${getCellRef(2 + y, ownersRow)}*${getCellRef(2 + y, bookingsPerOwnerRow)}*${getCellRef(2 + y, avgPriceRow)}*${getCellRef(2 + y, commissionRow)}*${getCellRef(2 + y, chargeBookingRow)}` }));
+          years.forEach(y => rowData.push({ formula: `${getCellRef(2 + y, ownersRow)}*${getCellRef(2 + y, bookingsPerOwnerRow)}*${getCellRef(2 + y, avgPriceRow)}*${getCellRef(2 + y, commissionRow)}*${getCellRef(2 + y, chargeBookingRowIdx)}` }));
         } else {
           years.forEach(y => rowData.push(getStreamValue(market as Market, 'Revenue', name, y)));
         }
-        rowData.push({ f: `SUM(C${currentRow + 1}:G${currentRow + 1})` });
-        rows.push(rowData);
-        currentRow++;
+        rowData.push({ formula: `SUM(C${currentRow + 1}:G${currentRow + 1})` });
+        sheet.addRow(rowData); currentRow++;
       });
-      const revenueEndRow = currentRow - 1;
-      const revenueTotalRow = currentRow;
-      rows.push([
+      const revenueEndRowIdx = currentRow - 1;
+      const revenueTotalRowIdx = currentRow;
+      sheet.addRow([
         'Revenue Total', 
         '', 
-        ...years.map(y => ({ f: `SUM(${getCellRef(2 + y, revenueStartRow)}:${getCellRef(2 + y, revenueEndRow)})` })),
-        { f: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
+        ...years.map(y => ({ formula: `SUM(${getCellRef(2 + y, revenueStartRowIdx)}:${getCellRef(2 + y, revenueEndRowIdx)})` })),
+        { formula: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
       ]);
+      sheet.getRow(currentRow + 1).font = { bold: true };
       currentRow++;
 
-      rows.push([]); currentRow++;
+      sheet.addRow([]); currentRow++;
 
       // COGS
-      rows.push(['Category', 'Stream Name', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']); currentRow++;
-      const cogsStartRow = currentRow;
+      sheet.addRow(['Category', 'Stream Name', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']); currentRow++;
+      sheet.getRow(currentRow).font = { bold: true };
+      const cogsStartRowIdx = currentRow;
       cogsUnion.forEach(name => {
         const rowData: any[] = ['COGS', name];
         if (market === 'Aggregated') {
-          years.forEach(y => rowData.push({ f: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }));
+          years.forEach(y => rowData.push({ formula: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }));
         } else if (name === 'Payment Processing') {
           years.forEach(y => {
-            const col = 2 + y;
-            const vol = `(${getCellRef(col, subVolRow)}+${getCellRef(col, bookVolRow)})`;
-            const trans = `(${getCellRef(col, subTransRow)}+${getCellRef(col, bookTransRow)})`;
-            rowData.push({ f: `(${vol}*${getCellRef(col, feePctRow)}) + (${trans}*${getCellRef(col, feeFixedRow)})` });
+            const colIdx = 2 + y;
+            const vol = `(${getCellRef(colIdx, subVolRowIdx)}+${getCellRef(colIdx, bookVolRowIdx)})`;
+            const trans = `(${getCellRef(colIdx, subTransRowIdx)}+${getCellRef(colIdx, bookTransRowIdx)})`;
+            rowData.push({ formula: `(${vol}*${getCellRef(colIdx, feePctRowIdx)}) + (${trans}*${getCellRef(colIdx, feeFixedRowIdx)})` });
           });
         } else if (name === 'Customer acquisition costs') {
           const unitCacProvidersRow = metricRowMap['Unit CAC - Providers'];
           const unitCacOwnersRow = metricRowMap['Unit CAC - Owners'];
           years.forEach(y => {
-            const col = 2 + y;
-            const p = getCellRef(col, providersRow);
-            const o = getCellRef(col, ownersRow);
-            const ucp = getCellRef(col, unitCacProvidersRow);
-            const uco = getCellRef(col, unitCacOwnersRow);
-            const prevP = y > 0 ? getCellRef(col - 1, providersRow) : "0";
-            const prevO = y > 0 ? getCellRef(col - 1, ownersRow) : "0";
+            const colIdx = 2 + y;
+            const p = getCellRef(colIdx, providersRow);
+            const o = getCellRef(colIdx, ownersRow);
+            const ucp = getCellRef(colIdx, unitCacProvidersRow);
+            const uco = getCellRef(colIdx, unitCacOwnersRow);
+            const prevP = y > 0 ? getCellRef(colIdx - 1, providersRow) : "0";
+            const prevO = y > 0 ? getCellRef(colIdx - 1, ownersRow) : "0";
             const newP = `MAX(0, ${p}-${prevP})`;
             const newO = `MAX(0, ${o}-${prevO})`;
-            rowData.push({ f: `(${newP}*${ucp}) + (${newO}*${uco})` });
+            rowData.push({ formula: `(${newP}*${ucp}) + (${newO}*${uco})` });
           });
         } else if (name === 'Customer Support') {
           const unitCsProvidersRow = metricRowMap['Unit Customer Support cost - Providers'];
           const unitCsOwnersRow = metricRowMap['Unit Customer Support cost - Owners'];
           years.forEach(y => {
-            const col = 2 + y;
-            const p = getCellRef(col, providersRow);
-            const o = getCellRef(col, ownersRow);
-            const ucp = getCellRef(col, unitCsProvidersRow);
-            const uco = getCellRef(col, unitCsOwnersRow);
-            rowData.push({ f: `(${p}*${ucp}) + (${o}*${uco})` });
+            const colIdx = 2 + y;
+            const p = getCellRef(colIdx, providersRow);
+            const o = getCellRef(colIdx, ownersRow);
+            const ucp = getCellRef(colIdx, unitCsProvidersRow);
+            const uco = getCellRef(colIdx, unitCsOwnersRow);
+            rowData.push({ formula: `(${p}*${ucp}) + (${o}*${uco})` });
           });
         } else {
           years.forEach(y => rowData.push(getStreamValue(market as Market, 'COGS', name, y)));
         }
-        rowData.push({ f: `SUM(C${currentRow + 1}:G${currentRow + 1})` });
-        rows.push(rowData);
-        currentRow++;
+        rowData.push({ formula: `SUM(C${currentRow + 1}:G${currentRow + 1})` });
+        sheet.addRow(rowData); currentRow++;
       });
-      const cogsEndRow = currentRow - 1;
-      const cogsTotalRow = currentRow;
-      rows.push([
+      const cogsEndRowIdx = currentRow - 1;
+      const cogsTotalRowIdx = currentRow;
+      sheet.addRow([
         'COGS Total', 
         '', 
-        ...years.map(y => ({ f: `SUM(${getCellRef(2 + y, cogsStartRow)}:${getCellRef(2 + y, cogsEndRow)})` })),
-        { f: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
+        ...years.map(y => ({ formula: `SUM(${getCellRef(2 + y, cogsStartRowIdx)}:${getCellRef(2 + y, cogsEndRowIdx)})` })),
+        { formula: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
       ]);
+      sheet.getRow(currentRow + 1).font = { bold: true };
       currentRow++;
 
-      rows.push([]); currentRow++;
+      sheet.addRow([]); currentRow++;
 
       // Fixed Costs
-      rows.push(['Category', 'Stream Name', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']); currentRow++;
-      const fixedStartRow = currentRow;
+      sheet.addRow(['Category', 'Stream Name', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']); currentRow++;
+      sheet.getRow(currentRow).font = { bold: true };
+      const fixedStartRowIdx = currentRow;
       fixedUnion.forEach(name => {
         const rowData: any[] = ['Fixed Cost', name];
         years.forEach(y => {
           if (market === 'Aggregated') {
-            rowData.push({ f: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` });
+            rowData.push({ formula: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` });
           } else {
             rowData.push(getStreamValue(market as Market, 'Fixed Cost', name, y));
           }
         });
-        rowData.push({ f: `SUM(C${currentRow + 1}:G${currentRow + 1})` });
-        rows.push(rowData);
-        currentRow++;
+        rowData.push({ formula: `SUM(C${currentRow + 1}:G${currentRow + 1})` });
+        sheet.addRow(rowData); currentRow++;
       });
-      const fixedEndRow = currentRow - 1;
-      const fixedTotalRow = currentRow;
-      rows.push([
+      const fixedEndRowIdx = currentRow - 1;
+      const fixedTotalRowIdx = currentRow;
+      sheet.addRow([
         'Fixed Cost Total', 
         '', 
-        ...years.map(y => ({ f: `SUM(${getCellRef(2 + y, fixedStartRow)}:${getCellRef(2 + y, fixedEndRow)})` })),
-        { f: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
+        ...years.map(y => ({ formula: `SUM(${getCellRef(2 + y, fixedStartRowIdx)}:${getCellRef(2 + y, fixedEndRowIdx)})` })),
+        { formula: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
       ]);
+      sheet.getRow(currentRow + 1).font = { bold: true };
       currentRow++;
 
-      rows.push([]); currentRow++;
+      sheet.addRow([]); currentRow++;
 
       // Summary
-      rows.push(['Summary', 'Metric', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']); currentRow++;
+      sheet.addRow(['Summary', 'Metric', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']); currentRow++;
+      sheet.getRow(currentRow).font = { bold: true };
       
       // Gross Revenues
-      rows.push([
+      sheet.addRow([
         'Summary',
         'Gross Revenues',
-        ...years.map(y => ({ f: `${getCellRef(2 + y, subVolRow)}+${getCellRef(2 + y, bookVolRow)}` })),
-        { f: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
+        ...years.map(y => ({ formula: `${getCellRef(2 + y, subVolRowIdx)}+${getCellRef(2 + y, bookVolRowIdx)}` })),
+        { formula: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
       ]); currentRow++;
 
       // Net Revenues
-      rows.push([
+      sheet.addRow([
         'Summary', 
         'Net Revenues', 
-        ...years.map(y => ({ f: getCellRef(2 + y, revenueTotalRow) })),
-        { f: getCellRef(7, revenueTotalRow) }
+        ...years.map(y => ({ formula: getCellRef(2 + y, revenueTotalRowIdx) })),
+        { formula: getCellRef(7, revenueTotalRowIdx) }
       ]); currentRow++;
 
       // COGS
-      rows.push([
+      sheet.addRow([
         'Summary', 
         'COGS', 
-        ...years.map(y => ({ f: getCellRef(2 + y, cogsTotalRow) })),
-        { f: getCellRef(7, cogsTotalRow) }
+        ...years.map(y => ({ formula: getCellRef(2 + y, cogsTotalRowIdx) })),
+        { formula: getCellRef(7, cogsTotalRowIdx) }
       ]); currentRow++;
 
       // Gross Margin
-      const gmRow = currentRow;
-      rows.push([
+      const gmRowIdx = currentRow;
+      sheet.addRow([
         'Summary', 
         'Gross Margin', 
-        ...years.map(y => ({ f: `${getCellRef(2 + y, gmRow - 2)}-${getCellRef(2 + y, gmRow - 1)}` })),
-        { f: `${getCellRef(7, gmRow - 2)}-${getCellRef(7, gmRow - 1)}` }
+        ...years.map(y => ({ formula: `${getCellRef(2 + y, gmRowIdx - 2)}-${getCellRef(2 + y, gmRowIdx - 1)}` })),
+        { formula: `${getCellRef(7, gmRowIdx - 2)}-${getCellRef(7, gmRowIdx - 1)}` }
       ]); currentRow++;
 
       // Gross Margin %
-      rows.push([
+      sheet.addRow([
         'Summary', 
         'Gross Margin %', 
-        ...years.map(y => ({ f: `IF(${getCellRef(2 + y, gmRow - 2)}>0, ${getCellRef(2 + y, gmRow)}/${getCellRef(2 + y, gmRow - 2)}, 0)` })),
-        { f: `IF(${getCellRef(7, gmRow - 2)}>0, ${getCellRef(7, gmRow)}/${getCellRef(7, gmRow - 2)}, 0)` }
-      ]); currentRow++;
+        ...years.map(y => ({ formula: `IF(${getCellRef(2 + y, gmRowIdx - 2)}>0, ${getCellRef(2 + y, gmRowIdx)}/${getCellRef(2 + y, gmRowIdx - 2)}, 0)` })),
+        { formula: `IF(${getCellRef(7, gmRowIdx - 2)}>0, ${getCellRef(7, gmRowIdx)}/${getCellRef(7, gmRowIdx - 2)}, 0)` }
+      ]); 
+      sheet.getRow(currentRow).getCell(3).numFmt = '0.0%';
+      sheet.getRow(currentRow).getCell(4).numFmt = '0.0%';
+      sheet.getRow(currentRow).getCell(5).numFmt = '0.0%';
+      sheet.getRow(currentRow).getCell(6).numFmt = '0.0%';
+      sheet.getRow(currentRow).getCell(7).numFmt = '0.0%';
+      sheet.getRow(currentRow).getCell(8).numFmt = '0.0%';
+      currentRow++;
 
       // Fixed Costs
-      rows.push([
+      sheet.addRow([
         'Summary', 
         'Fixed Costs', 
-        ...years.map(y => ({ f: getCellRef(2 + y, fixedTotalRow) })),
-        { f: getCellRef(7, fixedTotalRow) }
+        ...years.map(y => ({ formula: getCellRef(2 + y, fixedTotalRowIdx) })),
+        { formula: getCellRef(7, fixedTotalRowIdx) }
       ]); currentRow++;
 
       // Operating Profit
-      const opRow = currentRow;
-      rows.push([
+      const opRowIdx = currentRow;
+      sheet.addRow([
         'Summary', 
         'Operating Profit', 
-        ...years.map(y => ({ f: `${getCellRef(2 + y, opRow - 3)}-${getCellRef(2 + y, opRow - 1)}` })),
-        { f: `${getCellRef(7, opRow - 3)}-${getCellRef(7, opRow - 1)}` }
+        ...years.map(y => ({ formula: `${getCellRef(2 + y, opRowIdx - 3)}-${getCellRef(2 + y, opRowIdx - 1)}` })),
+        { formula: `${getCellRef(7, opRowIdx - 3)}-${getCellRef(7, opRowIdx - 1)}` }
       ]); currentRow++;
 
       // Operating Profit %
-      rows.push([
+      sheet.addRow([
         'Summary', 
         'Operating Profit %', 
-        ...years.map(y => ({ f: `IF(${getCellRef(2 + y, gmRow - 2)}>0, ${getCellRef(2 + y, opRow)}/${getCellRef(2 + y, gmRow - 2)}, 0)` })),
-        { f: `IF(${getCellRef(7, gmRow - 2)}>0, ${getCellRef(7, opRow)}/${getCellRef(7, gmRow - 2)}, 0)` }
+        ...years.map(y => ({ formula: `IF(${getCellRef(2 + y, gmRowIdx - 2)}>0, ${getCellRef(2 + y, opRowIdx)}/${getCellRef(2 + y, gmRowIdx - 2)}, 0)` })),
+        { formula: `IF(${getCellRef(7, gmRowIdx - 2)}>0, ${getCellRef(7, opRowIdx)}/${getCellRef(7, gmRowIdx - 2)}, 0)` }
+      ]);
+      sheet.getRow(currentRow).getCell(3).numFmt = '0.0%';
+      sheet.getRow(currentRow).getCell(4).numFmt = '0.0%';
+      sheet.getRow(currentRow).getCell(5).numFmt = '0.0%';
+      sheet.getRow(currentRow).getCell(6).numFmt = '0.0%';
+      sheet.getRow(currentRow).getCell(7).numFmt = '0.0%';
+      sheet.getRow(currentRow).getCell(8).numFmt = '0.0%';
+      currentRow++;
+
+      sheet.addRow([]); currentRow++;
+
+      // Payment Processing Breakdown
+      sheet.addRow(['Payment Processing Breakdown', 'Metric', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5']); currentRow++;
+      sheet.getRow(currentRow).font = { bold: true };
+
+      const dynamicFeePctRowIdx = metricRowMap['Payment Fee %'];
+      const dynamicFeePerTxRowIdx = metricRowMap['Payment Fee per Transaction'];
+
+      sheet.addRow([
+        'Breakdown', 
+        'Payment Fee %', 
+        ...years.map(y => (dynamicFeePctRowIdx !== undefined ? { formula: getCellRef(2 + y, dynamicFeePctRowIdx) } : 0.029))
+      ]); 
+      sheet.getRow(currentRow + 1).getCell(3).numFmt = '0.0%';
+      sheet.getRow(currentRow + 1).getCell(4).numFmt = '0.0%';
+      sheet.getRow(currentRow + 1).getCell(5).numFmt = '0.0%';
+      sheet.getRow(currentRow + 1).getCell(6).numFmt = '0.0%';
+      sheet.getRow(currentRow + 1).getCell(7).numFmt = '0.0%';
+      currentRow++;
+
+      sheet.addRow([
+        'Breakdown', 
+        'Payment Fee per Transaction', 
+        ...years.map(y => (dynamicFeePerTxRowIdx !== undefined ? { formula: getCellRef(2 + y, dynamicFeePerTxRowIdx) } : 0.30))
       ]); currentRow++;
 
-      rows.push([]); currentRow++;
-
-      // Payment Processing Breakdown (Helper Section) - Moved to end
-      rows.push(['Payment Processing Breakdown', 'Metric', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5']); currentRow++;
-
-      // Fee %
-      rows.push(['Breakdown', 'Payment Fee %', ...years.map(() => 0.029)]); currentRow++;
-      
-      // Fee per Transaction
-      rows.push(['Breakdown', 'Payment Fee per Transaction', ...years.map(() => 0.30)]); currentRow++;
-
-      // The following rows match the pre-calculated subVolRow, bookVolRow, etc.
       if (market === 'Aggregated') {
-        rows.push(['Breakdown', 'Subscription Volume', ...years.map(y => ({ f: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }))]);
+        sheet.addRow(['Breakdown', 'Subscription Volume', ...years.map(y => ({ formula: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }))]);
       } else {
-        rows.push(['Breakdown', 'Subscription Volume', ...years.map(y => ({ f: `${getCellRef(2 + y, providersRow)}*${getCellRef(2 + y, subFeeRow)}*${getCellRef(2 + y, chargeSubRow)}*12` }))]);
+        sheet.addRow(['Breakdown', 'Subscription Volume', ...years.map(y => ({ formula: `${getCellRef(2 + y, providersRow)}*${getCellRef(2 + y, subFeeRow)}*${getCellRef(2 + y, chargeSubRowIdx)}*12` }))]);
       }
       currentRow++;
 
       if (market === 'Aggregated') {
-        rows.push(['Breakdown', 'Booking Volume', ...years.map(y => ({ f: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }))]);
+        sheet.addRow(['Breakdown', 'Booking Volume', ...years.map(y => ({ formula: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }))]);
       } else {
-        rows.push(['Breakdown', 'Booking Volume', ...years.map(y => ({ f: `${getCellRef(2 + y, ownersRow)}*${getCellRef(2 + y, bookingsPerOwnerRow)}*${getCellRef(2 + y, avgPriceRow)}` }))]);
+        sheet.addRow(['Breakdown', 'Booking Volume', ...years.map(y => ({ formula: `${getCellRef(2 + y, ownersRow)}*${getCellRef(2 + y, bookingsPerOwnerRow)}*${getCellRef(2 + y, avgPriceRow)}` }))]);
       }
       currentRow++;
 
       if (market === 'Aggregated') {
-        rows.push(['Breakdown', 'Subscription Transactions', ...years.map(y => ({ f: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }))]);
+        sheet.addRow(['Breakdown', 'Subscription Transactions', ...years.map(y => ({ formula: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }))]);
       } else {
-        rows.push(['Breakdown', 'Subscription Transactions', ...years.map(y => ({ f: `${getCellRef(2 + y, providersRow)}*12*${getCellRef(2 + y, chargeSubRow)}` }))]);
+        sheet.addRow(['Breakdown', 'Subscription Transactions', ...years.map(y => ({ formula: `${getCellRef(2 + y, providersRow)}*12*${getCellRef(2 + y, chargeSubRowIdx)}` }))]);
       }
       currentRow++;
 
       if (market === 'Aggregated') {
-        rows.push(['Breakdown', 'Booking Transactions', ...years.map(y => ({ f: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }))]);
+        sheet.addRow(['Breakdown', 'Booking Transactions', ...years.map(y => ({ formula: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }))]);
       } else {
-        rows.push(['Breakdown', 'Booking Transactions', ...years.map(y => ({ f: `${getCellRef(2 + y, ownersRow)}*${getCellRef(2 + y, bookingsPerOwnerRow)}` }))]);
+        sheet.addRow(['Breakdown', 'Booking Transactions', ...years.map(y => ({ formula: `${getCellRef(2 + y, ownersRow)}*${getCellRef(2 + y, bookingsPerOwnerRow)}` }))]);
       }
       currentRow++;
 
-      const ws = XLSX.utils.aoa_to_sheet(rows);
-
-      // Apply formatting
-      const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
-      for (let R = range.s.r; R <= range.e.r; ++R) {
-        const firstCell = ws[XLSX.utils.encode_cell({ r: R, c: 0 })];
-        const secondCell = ws[XLSX.utils.encode_cell({ r: R, c: 1 })];
-        const category = firstCell?.v;
-        const name = secondCell?.v;
-
-        // Check if this row should be formatted as percentage
-        const isPercentage = 
-          name === '% of bookings commission' || 
-          name === 'Gross Margin %' || 
-          name === 'Operating Profit %' || 
-          name === 'Payment Fee %';
-        
-        const isPlatformMetric = category === 'Platform Metric';
-
-        if (isPercentage) {
-          for (let C = 2; C <= range.e.c; ++C) {
-            const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
-            if (cell && (cell.t === 'n' || cell.f)) {
-              cell.z = '0.0%';
-            }
-          }
-        } else if (isPlatformMetric) {
-          for (let C = 2; C <= range.e.c; ++C) {
-            const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
-            if (cell && (cell.t === 'n' || cell.f)) {
-              cell.z = '0';
-            }
-          }
-        }
-      }
-
-      XLSX.utils.book_append_sheet(wb, ws, market);
+      // Column widths
+      sheet.getColumn(1).width = 25;
+      sheet.getColumn(2).width = 35;
+      for (let i = 3; i <= 8; i++) sheet.getColumn(i).width = 15;
     });
 
-    XLSX.writeFile(wb, "financial_viability_tracker.xlsx");
+    // 2. Add Charts Sheet
+    if (capturedImages.length > 0) {
+      const chartsSheet = workbook.addWorksheet('Charts');
+      let currentImgRow = 1;
+
+      for (const img of capturedImages) {
+        const imageId = workbook.addImage({
+          base64: img.data.split(',')[1],
+          extension: 'png',
+        });
+
+        chartsSheet.getCell(currentImgRow, 1).value = img.name;
+        chartsSheet.getCell(currentImgRow, 1).font = { bold: true, size: 12 };
+        
+        // Add image - estimate size
+        chartsSheet.addImage(imageId, {
+          tl: { col: 0, row: currentImgRow },
+          ext: { width: 600, height: 350 }
+        });
+        
+        currentImgRow += 20; // Skip rows for the image
+      }
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    saveAs(new Blob([buffer]), "financial_viability_tracker.xlsx");
   };
 
   const renderCustomBarLabel = (props: any) => {
@@ -1341,8 +1407,17 @@ export default function App() {
     sectionRef?: React.RefObject<HTMLDivElement>,
     downloadId?: string
   ) => {
-    const formatValue = (val: number) => {
+    const formatValue = (val: number, streamName?: string) => {
       if (formatType === 'currency') return formatCurrency(val);
+      if (streamName) {
+        const lowerName = streamName.toLowerCase();
+        if (lowerName.includes('%') || lowerName.includes('percent') || lowerName.includes('rate')) {
+          return new Intl.NumberFormat('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(val);
+        }
+        if (lowerName.includes('per transaction') || lowerName.includes('unit') || lowerName.includes('fee') || lowerName.includes('avg price')) {
+          return new Intl.NumberFormat('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(val);
+        }
+      }
       return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(val);
     };
     const isReadOnly = activeMarket === 'Aggregated';
@@ -1404,7 +1479,7 @@ export default function App() {
                   {stream.name}
                   {stream.name === 'Payment Processing' && (
                     <div className="hidden group-hover:block absolute z-10 w-64 p-2 mt-1 text-xs font-normal text-white bg-slate-800 rounded-lg shadow-lg -left-2 top-full">
-                      Formula: (Total Volume × 2.9%) + (Total Transactions × €0.30)
+                      Formula: (Total Volume × Payment Fee %) + (Total Transactions × Payment Fee per Transaction)
                       <br />
                       <span className="opacity-70 italic">Includes both Subscriptions and Bookings.</span>
                     </div>
@@ -1435,7 +1510,7 @@ export default function App() {
                 <div key={y} className="relative">
                   {isReadOnly || stream.isCalculated ? (
                     <div className={`block w-full px-1 py-2 border border-slate-200 bg-slate-100 rounded-lg text-xs text-center text-slate-500 transition-colors ${Number(stream.amounts[y]) < 0 ? 'text-red-600' : ''}`}>
-                      {formatValue(Number(stream.amounts[y]))}
+                      {formatValue(Number(stream.amounts[y]), stream.name)}
                     </div>
                   ) : (
                     <input
@@ -1450,7 +1525,7 @@ export default function App() {
               ))}
               {showTotal && (
                 <div className={`flex items-center justify-end text-sm font-semibold whitespace-nowrap ${getStreamTotal(stream) >= 0 ? 'text-slate-700' : 'text-red-600'}`}>
-                  {formatValue(getStreamTotal(stream))}
+                  {formatValue(getStreamTotal(stream), stream.name)}
                 </div>
               )}
             </div>
@@ -1473,7 +1548,8 @@ export default function App() {
         </div>
       )}
     </div>
-  )};
+    );
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans text-slate-900">
@@ -1555,7 +1631,7 @@ export default function App() {
           </button>
         </div>
 
-        {activeTab === 'financials' && (
+        <div className={activeTab === 'financials' ? 'block' : 'opacity-0 pointer-events-none absolute -z-10 w-full'}>
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
             {/* Inputs Section */}
             <div className="xl:col-span-7 space-y-6">
@@ -1825,11 +1901,126 @@ export default function App() {
                 </ResponsiveContainer>
               </div>
             </div>
+
+            {/* Comparative Visualizer Card: Retail Sales, Operating Costs, and Operating Profit */}
+            <div ref={viabilityComparisonChartRef} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 relative group">
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <div className="flex items-center space-x-3">
+                    <h2 className="text-lg font-medium text-slate-900">Retail Sales vs. Costs & Profit</h2>
+                    <MarketFlags market={activeMarket} />
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">Comparing Gross Booking Volume vs. Combined Operating Expenses & Operating Profit</p>
+                </div>
+                <div data-export-exclude="true" className="flex space-x-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                  <button 
+                    onClick={() => copyChart(viabilityComparisonChartRef, 'viability-comparison')}
+                    className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                    title="Copy to Clipboard"
+                  >
+                    {copiedChart === 'viability-comparison' ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                  </button>
+                  <button 
+                    onClick={() => downloadChart(viabilityComparisonChartRef, 'viability-comparison')}
+                    className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                    title="Download as PNG"
+                  >
+                    <Camera className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+              
+              <div className="h-96 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={viabilityChartData}
+                    margin={{ top: 25, right: 10, left: 10, bottom: 20 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                    <XAxis 
+                      dataKey="name" 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fill: '#64748b', fontSize: 12 }} 
+                      dy={10}
+                    />
+                    <YAxis 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fill: '#64748b', fontSize: 12 }}
+                      tickFormatter={(value) => `€${value >= 1000000 ? (value / 1000000).toFixed(1) + 'M' : value >= 1000 ? (value / 1000).toFixed(0) + 'k' : value}`}
+                    />
+                    <Tooltip 
+                      formatter={(value: any, name: any) => [formatCurrency(Number(value) || 0), name]}
+                      cursor={{ fill: '#f1f5f9' }}
+                      contentStyle={{ borderRadius: '0.75rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                    />
+                    <Legend 
+                      verticalAlign="bottom"
+                      height={36}
+                      iconType="circle"
+                      content={(props) => {
+                        const { payload } = props;
+                        return (
+                          <div className="flex justify-center space-x-6 pt-4">
+                            {payload?.map((entry: any, index: number) => {
+                              let displayName = entry.value;
+                              let displayColor = entry.color;
+                              if (displayName === 'Operating Profit') {
+                                displayColor = operatingProfit >= 0 ? '#10b981' : '#ef4444';
+                              }
+                              return (
+                                <div key={`legend-${index}`} className="flex items-center space-x-2">
+                                  <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: displayColor }}></div>
+                                  <span className="text-xs text-slate-600 font-medium">{displayName}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      }}
+                    />
+                    <Bar dataKey="Retail Sales" fill="#4f46e5" radius={[4, 4, 0, 0]}>
+                      <LabelList dataKey="Retail Sales" content={renderCustomBarLabel} />
+                    </Bar>
+                    <Bar dataKey="Operating Costs" fill="#f97316" radius={[4, 4, 0, 0]}>
+                      <LabelList dataKey="Operating Costs" content={renderCustomBarLabel} />
+                    </Bar>
+                    <Bar dataKey="Operating Profit" fill="#10b981" radius={[4, 4, 0, 0]}>
+                      <LabelList dataKey="Operating Profit" content={renderCustomBarLabel} />
+                      {viabilityChartData.map((entry: any, index: number) => (
+                        <Cell 
+                          key={`cell-${index}`} 
+                          fill={entry['Operating Profit'] >= 0 ? '#10b981' : '#ef4444'} 
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="mt-6 p-4 bg-slate-50 rounded-xl grid grid-cols-3 gap-4 border border-slate-100 text-center">
+                <div>
+                  <div className="text-[10px] text-slate-400 uppercase font-semibold">Total Retail Sales</div>
+                  <div className="text-sm font-bold text-indigo-700 mt-1">{formatCurrency(totalGrossRevenue)}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-slate-400 uppercase font-semibold">Total Operating Costs</div>
+                  <div className="text-sm font-bold text-orange-600 mt-1">{formatCurrency(totalVariableCosts + fixedCosts)}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-slate-400 uppercase font-semibold">5-Yr Net Profit</div>
+                  <div className={`text-sm font-bold mt-1 ${operatingProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                    {formatCurrency(operatingProfit)}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
-        )}
+      </div>
 
-        {activeTab === 'platform' && (
+        <div className={activeTab === 'platform' ? 'block' : 'opacity-0 pointer-events-none absolute -z-10 w-full'}>
           <div className="space-y-8">
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
               <div className="xl:col-span-7 space-y-6">
@@ -2088,9 +2279,9 @@ export default function App() {
               </div>
             </div>
           </div>
-        )}
+        </div>
 
-        {activeTab === 'gross-margin' && (
+        <div className={activeTab === 'gross-margin' ? 'block' : 'opacity-0 pointer-events-none absolute -z-10 w-full'}>
           <div className="space-y-8">
             <div ref={grossMarginTableRef} className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative group">
               <div className="flex justify-between items-start mb-6">
@@ -2210,7 +2401,7 @@ export default function App() {
               </div>
             </div>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
