@@ -1,5 +1,6 @@
 {
   "name": "Financial Viability Tracker",
   "description": "An internal tool to calculate Gross Margin and Operating Profit based on Retail Sales and Operating Costs.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

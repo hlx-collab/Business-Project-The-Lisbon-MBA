@@ -346,10 +346,14 @@ export default function App() {
           const totalVolume = subVolume + bookingVolume;
 
           const feePctVal = paymentFeePctStream?.amounts?.[y];
-          const feePct = (feePctVal !== undefined && feePctVal !== '') ? Number(feePctVal) / 100 : 0.029;
+          const feePct = (feePctVal !== undefined && feePctVal !== null)
+            ? (feePctVal === '' ? 0 : Number(feePctVal) / 100)
+            : 0.029;
 
           const feePerTxVal = paymentFeePerTxStream?.amounts?.[y];
-          const feePerTx = (feePerTxVal !== undefined && feePerTxVal !== '') ? Number(feePerTxVal) : 0.30;
+          const feePerTx = (feePerTxVal !== undefined && feePerTxVal !== null)
+            ? (feePerTxVal === '' ? 0 : Number(feePerTxVal))
+            : 0.30;
 
           const cost = (totalVolume * feePct) + (totalTransactions * feePerTx);
           return cost;
@@ -1343,27 +1347,65 @@ export default function App() {
       for (let i = 3; i <= 8; i++) sheet.getColumn(i).width = 15;
     });
 
-    // 2. Add Charts Sheet
-    if (capturedImages.length > 0) {
-      const chartsSheet = workbook.addWorksheet('Charts');
-      let currentImgRow = 1;
+    // 2. Add Charts Sheet with Instructions & Static Previews
+    const chartsSheet = workbook.addWorksheet('Charts & Previews');
+    
+    // Add helpful header instructions on how to create native, cell-linked charts
+    chartsSheet.mergeCells('A1:H1');
+    const headerCell = chartsSheet.getCell('A1');
+    headerCell.value = '💡 How to insert Native, Dynamic, Cell-Linked Charts in Excel / Google Sheets:';
+    headerCell.font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
+    headerCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF1E293B' } // Slate background
+    };
+    headerCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+    chartsSheet.getRow(1).height = 30;
 
+    const instructions = [
+      '1. Click on any data sheet tab (e.g., "Portugal", "UK", or "Aggregated").',
+      '2. Select the numerical range or table rows you want to graph (e.g., Year 1 to Year 5 values, including the category headers).',
+      '3. MS Excel: Select the "Insert" tab at the top -> click "Recommended Charts" or choose Bar/Line chart.',
+      '4. Google Sheets: Go to the "Insert" menu -> click "Chart".',
+      '5. Because the sheets utilize formulas (SUM, division, ratios), your newly inserted charts will be dynamically linked and auto-updating!'
+    ];
+
+    instructions.forEach((line, index) => {
+      const rowNum = 2 + index;
+      chartsSheet.mergeCells(`A${rowNum}:H${rowNum}`);
+      const cell = chartsSheet.getCell(`A${rowNum}`);
+      cell.value = line;
+      cell.font = { italic: true, size: 10, color: { argb: 'FF475569' } };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFF1F5F9' } // Soft neutral white/slate
+      };
+      cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+      chartsSheet.getRow(rowNum).height = 20;
+    });
+
+    chartsSheet.addRow([]); // empty spacing row
+    let currentImgRow = 9;
+
+    if (capturedImages.length > 0) {
       for (const img of capturedImages) {
         const imageId = workbook.addImage({
           base64: img.data.split(',')[1],
           extension: 'png',
         });
 
-        chartsSheet.getCell(currentImgRow, 1).value = img.name;
-        chartsSheet.getCell(currentImgRow, 1).font = { bold: true, size: 12 };
+        chartsSheet.getCell(currentImgRow, 1).value = `📊 Static Reference: ${img.name}`;
+        chartsSheet.getCell(currentImgRow, 1).font = { bold: true, size: 11, color: { argb: 'FF0F172A' } };
         
         // Add image - estimate size
         chartsSheet.addImage(imageId, {
           tl: { col: 0, row: currentImgRow },
-          ext: { width: 600, height: 350 }
+          ext: { width: 620, height: 360 }
         });
         
-        currentImgRow += 20; // Skip rows for the image
+        currentImgRow += 21; // Skip rows for the image
       }
     }
 
@@ -1407,6 +1449,27 @@ export default function App() {
     sectionRef?: React.RefObject<HTMLDivElement>,
     downloadId?: string
   ) => {
+    const isReadOnly = activeMarket === 'Aggregated';
+
+    const getValidationError = (streamName: string, val: number | string): string | null => {
+      if (val === '') return null;
+      const numVal = Number(val);
+      if (isNaN(numVal)) return null;
+      const lowerName = streamName.toLowerCase();
+      
+      if (lowerName.includes('%') || lowerName.includes('percent') || lowerName.includes('rate') || lowerName.includes('commission')) {
+        if (numVal < 0) return 'Percentage cannot be negative';
+        if (numVal > 100) return 'Percentage cannot exceed 100%';
+        return null;
+      }
+      
+      if (numVal < 0) {
+        return 'Value cannot be negative';
+      }
+      
+      return null;
+    };
+
     const formatValue = (val: number, streamName?: string) => {
       if (formatType === 'currency') return formatCurrency(val);
       if (streamName) {
@@ -1420,7 +1483,25 @@ export default function App() {
       }
       return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(val);
     };
-    const isReadOnly = activeMarket === 'Aggregated';
+
+    // Calculate section errors
+    const sectionErrors: { streamName: string; yearNum: number; error: string }[] = [];
+    if (!isReadOnly) {
+      streams.forEach(stream => {
+        if (!stream.isCalculated) {
+          years.forEach(y => {
+            const err = getValidationError(stream.name, stream.amounts[y]);
+            if (err) {
+              sectionErrors.push({
+                streamName: stream.name,
+                yearNum: y + 1,
+                error: err
+              });
+            }
+          });
+        }
+      });
+    }
     
     return (
     <div ref={sectionRef} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6 relative group">
@@ -1460,6 +1541,28 @@ export default function App() {
       </div>
       
       <div className="space-y-6">
+        {/* Validation Errors Header Banner */}
+        {sectionErrors.length > 0 && (
+          <div className="p-3 bg-red-50/80 border border-red-200/60 rounded-xl flex items-start space-x-3 text-red-800 text-xs sm:text-sm transition-all duration-300 animate-in fade-in slide-in-from-top-2">
+            <span className="relative flex h-2 w-2 mt-1.5 flex-shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+            </span>
+            <div className="flex-1">
+              <p className="font-semibold text-red-900 mb-1">
+                Invalid values detected ({sectionErrors.length}):
+              </p>
+              <ul className="list-disc pl-4 space-y-0.5 text-red-700 font-medium">
+                {sectionErrors.map((err, idx) => (
+                  <li key={idx}>
+                    Year {err.yearNum} for <strong>{err.streamName}</strong>: {err.error}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+
         {/* Header Row for Years */}
         <div className="flex flex-col sm:flex-row sm:items-center space-y-3 sm:space-y-0 sm:space-x-3 p-3 border border-transparent">
           <div className="flex-1"></div>
@@ -1506,23 +1609,41 @@ export default function App() {
             </div>
             
             <div className={`grid ${showTotal ? 'grid-cols-6' : 'grid-cols-5'} gap-2 w-full sm:max-w-[550px]`}>
-              {years.map(y => (
-                <div key={y} className="relative">
-                  {isReadOnly || stream.isCalculated ? (
-                    <div className={`block w-full px-1 py-2 border border-slate-200 bg-slate-100 rounded-lg text-xs text-center text-slate-500 transition-colors ${Number(stream.amounts[y]) < 0 ? 'text-red-600' : ''}`}>
-                      {formatValue(Number(stream.amounts[y]), stream.name)}
-                    </div>
-                  ) : (
-                    <input
-                      type="number"
-                      value={stream.amounts[y]}
-                      onChange={(e) => updateStreamAmount(streams, stream.id, y, e.target.value ? Number(e.target.value) : '', stateKey)}
-                      className={`block w-full px-1 py-2 border border-slate-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-xs text-center transition-colors ${Number(stream.amounts[y]) < 0 ? 'text-red-600' : ''}`}
-                      placeholder="0"
-                    />
-                  )}
-                </div>
-              ))}
+              {years.map(y => {
+                const error = getValidationError(stream.name, stream.amounts[y]);
+                const hasError = !!error;
+
+                return (
+                  <div key={y} className="relative">
+                    {isReadOnly || stream.isCalculated ? (
+                      <div className={`block w-full px-1 py-2 border border-slate-200 bg-slate-100 rounded-lg text-xs text-center text-slate-500 transition-colors ${Number(stream.amounts[y]) < 0 ? 'text-red-600' : ''}`}>
+                        {formatValue(Number(stream.amounts[y]), stream.name)}
+                      </div>
+                    ) : (
+                      <div className="relative">
+                        <input
+                          type="number"
+                          value={stream.amounts[y]}
+                          onChange={(e) => updateStreamAmount(streams, stream.id, y, e.target.value ? Number(e.target.value) : '', stateKey)}
+                          className={`block w-full px-1 py-2 border rounded-lg text-xs text-center transition-all duration-150 ${
+                            hasError 
+                              ? 'border-red-400 bg-red-50/70 text-red-950 placeholder-red-300 focus:ring-red-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200' 
+                              : 'border-slate-300 bg-white text-slate-900 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 hover:border-slate-400'
+                          }`}
+                          placeholder="0"
+                          title={error || undefined}
+                        />
+                        {hasError && (
+                          <span className="absolute -top-1 -right-1 flex h-2 w-2" title={error || undefined}>
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               {showTotal && (
                 <div className={`flex items-center justify-end text-sm font-semibold whitespace-nowrap ${getStreamTotal(stream) >= 0 ? 'text-slate-700' : 'text-red-600'}`}>
                   {formatValue(getStreamTotal(stream), stream.name)}
