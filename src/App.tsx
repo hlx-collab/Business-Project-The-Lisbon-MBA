@@ -66,7 +66,7 @@ const DEFAULT_FIXED_COSTS_STREAMS: FinancialStream[] = [
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'financials' | 'platform' | 'gross-margin'>('financials');
+  const [activeTab, setActiveTab] = useState<'financials' | 'platform' | 'gross-margin' | 'cash-flow' | 'balance-sheet'>('financials');
   const [activeMarket, setActiveMarket] = useState<Market>('Portugal');
   const [copiedChart, setCopiedChart] = useState<string | null>(null);
 
@@ -405,9 +405,8 @@ export default function App() {
       const owners = Number(ownersStream?.amounts?.[y]) || 0;
       const bookingsPerOwner = Number(bookingsPerOwnerStream?.amounts?.[y]) || 0;
       const avgPrice = Number(avgPriceStream?.amounts?.[y]) || 0;
-      const chargeBook = chargeBookingFees[y] ? 1 : 0;
       
-      const bookingVolume = owners * bookingsPerOwner * avgPrice * chargeBook;
+      const bookingVolume = owners * bookingsPerOwner * avgPrice;
       
       const subscriptionsRevenue = derivedRevenueStreams.find(s => s.name === 'Monthly Subscriptions')?.amounts?.[y] || 0;
       const otherRevenue = derivedRevenueStreams
@@ -436,6 +435,77 @@ export default function App() {
     const calculatedMarginPercent = totalRevenue > 0 ? (grossMargin / totalRevenue) * 100 : 0;
     const calculatedOpProfitPercent = totalRevenue > 0 ? (operatingProfit / totalRevenue) * 100 : 0;
 
+    const TAX_RATE = 0.21;
+    const EQUITY_INJECTION = 200000;
+
+    let accumulatedLoss = 0;
+    const netIncomeByYear: number[] = [];
+    const taxByYear: number[] = [];
+
+    for (let i = 0; i < 5; i++) {
+        const ebit = opProfitByYear[i];
+        if (ebit < 0) {
+            taxByYear[i] = 0;
+            accumulatedLoss += Math.abs(ebit);
+            netIncomeByYear[i] = ebit;
+        } else {
+            let taxableIncome = 0;
+            if (accumulatedLoss > 0) {
+                if (ebit <= accumulatedLoss) {
+                    taxableIncome = 0;
+                    accumulatedLoss -= ebit;
+                } else {
+                    taxableIncome = ebit - accumulatedLoss;
+                    accumulatedLoss = 0;
+                }
+            } else {
+                taxableIncome = ebit;
+            }
+            const tax = taxableIncome * TAX_RATE;
+            taxByYear[i] = tax;
+            netIncomeByYear[i] = ebit - tax;
+        }
+    }
+
+    const defRevBalance = years.map(y => totalGrossRevenueByYear[y] * 0.01);
+    const accruedFeesBalance = years.map(y => totalGrossRevenueByYear[y] * 0.03);
+
+    const increaseDefRev: number[] = [];
+    const increaseAccruedFees: number[] = [];
+    const cashFromOp: number[] = [];
+
+    for (let i = 0; i < 5; i++) {
+        increaseDefRev[i] = i === 0 ? defRevBalance[i] : defRevBalance[i] - defRevBalance[i - 1];
+        increaseAccruedFees[i] = i === 0 ? accruedFeesBalance[i] : accruedFeesBalance[i] - accruedFeesBalance[i - 1];
+        cashFromOp[i] = netIncomeByYear[i] + increaseDefRev[i] + increaseAccruedFees[i]; 
+    }
+
+    const cashFromFinancing = [EQUITY_INJECTION, ...years.slice(1).map(() => 0)];
+
+    const netIncreaseInCash: number[] = [];
+    const cashBalanceBeginning: number[] = [];
+    const cashBalanceEnd: number[] = [];
+
+    let currentCash = 0;
+    for (let i = 0; i < 5; i++) {
+        cashBalanceBeginning[i] = currentCash;
+        netIncreaseInCash[i] = cashFromOp[i] + cashFromFinancing[i];
+        currentCash += netIncreaseInCash[i];
+        cashBalanceEnd[i] = currentCash;
+    }
+
+    const shareCapital = years.map(() => EQUITY_INJECTION);
+    const retainedEarnings: number[] = [];
+    let currentRE = 0;
+    
+    for (let i = 0; i < 5; i++) {
+        retainedEarnings[i] = currentRE;
+        currentRE += netIncomeByYear[i];
+    }
+
+    const totalEquity = years.map(i => shareCapital[i] + retainedEarnings[i] + netIncomeByYear[i]);
+    const totalLiabilities = years.map(i => defRevBalance[i] + accruedFeesBalance[i]);
+
     return {
       platformMetricsStreams: derivedPlatformMetricsStreams,
       derivedRevenueStreams,
@@ -449,6 +519,21 @@ export default function App() {
       grossMarginPercentByYear,
       opProfitByYear,
       opProfitPercentByYear,
+      netIncomeByYear,
+      taxByYear,
+      defRevBalance,
+      accruedFeesBalance,
+      increaseDefRev,
+      increaseAccruedFees,
+      cashFromOp,
+      cashFromFinancing,
+      netIncreaseInCash,
+      cashBalanceBeginning,
+      cashBalanceEnd,
+      shareCapital,
+      retainedEarnings,
+      totalEquity,
+      totalLiabilities,
       totalRevenue,
       totalGrossRevenue,
       totalVariableCosts,
@@ -487,6 +572,21 @@ export default function App() {
     grossMarginPercentByYear,
     opProfitByYear,
     opProfitPercentByYear,
+    netIncomeByYear,
+    taxByYear,
+    defRevBalance,
+    accruedFeesBalance,
+    increaseDefRev,
+    increaseAccruedFees,
+    cashFromOp,
+    cashFromFinancing,
+    netIncreaseInCash,
+    cashBalanceBeginning,
+    cashBalanceEnd,
+    shareCapital,
+    retainedEarnings,
+    totalEquity,
+    totalLiabilities,
     totalRevenue,
     totalGrossRevenue,
     totalVariableCosts,
@@ -607,6 +707,76 @@ export default function App() {
       const grossMarginPercentByYear = years.map(y => totalRevenueByYear[y] > 0 ? (grossMarginByYear[y] / totalRevenueByYear[y]) * 100 : 0);
       const opProfitPercentByYear = years.map(y => totalRevenueByYear[y] > 0 ? (opProfitByYear[y] / totalRevenueByYear[y]) * 100 : 0);
 
+    const TAX_RATE = 0.21;
+    const EQUITY_INJECTION = 200000;
+
+    let accumulatedLoss = 0;
+    const netIncomeByYear: number[] = [];
+    const taxByYear: number[] = [];
+
+    for (let i = 0; i < 5; i++) {
+        const ebit = opProfitByYear[i];
+        if (ebit < 0) {
+            taxByYear[i] = 0;
+            accumulatedLoss += Math.abs(ebit);
+            netIncomeByYear[i] = ebit;
+        } else {
+            let taxableIncome = 0;
+            if (accumulatedLoss > 0) {
+                if (ebit <= accumulatedLoss) {
+                    taxableIncome = 0;
+                    accumulatedLoss -= ebit;
+                } else {
+                    taxableIncome = ebit - accumulatedLoss;
+                    accumulatedLoss = 0;
+                }
+            } else {
+                taxableIncome = ebit;
+            }
+            const tax = taxableIncome * TAX_RATE;
+            taxByYear[i] = tax;
+            netIncomeByYear[i] = ebit - tax;
+        }
+    }
+
+    const defRevBalance = years.map(y => totalGrossRevenueByYear[y] * 0.01);
+    const accruedFeesBalance = years.map(y => totalGrossRevenueByYear[y] * 0.03);
+
+    const increaseDefRev: number[] = [];
+    const increaseAccruedFees: number[] = [];
+    const cashFromOp: number[] = [];
+
+    for (let i = 0; i < 5; i++) {
+        increaseDefRev[i] = i === 0 ? defRevBalance[i] : defRevBalance[i] - defRevBalance[i - 1];
+        increaseAccruedFees[i] = i === 0 ? accruedFeesBalance[i] : accruedFeesBalance[i] - accruedFeesBalance[i - 1];
+        cashFromOp[i] = netIncomeByYear[i] + increaseDefRev[i] + increaseAccruedFees[i]; 
+    }
+
+    const cashFromFinancing = [EQUITY_INJECTION, ...years.slice(1).map(() => 0)];
+
+    const netIncreaseInCash: number[] = [];
+    const cashBalanceBeginning: number[] = [];
+    const cashBalanceEnd: number[] = [];
+
+    let currentCash = 0;
+    for (let i = 0; i < 5; i++) {
+        cashBalanceBeginning[i] = currentCash;
+        netIncreaseInCash[i] = cashFromOp[i] + cashFromFinancing[i];
+        currentCash += netIncreaseInCash[i];
+        cashBalanceEnd[i] = currentCash;
+    }
+
+    const shareCapital = years.map(() => EQUITY_INJECTION);
+    const retainedEarnings: number[] = [];
+    let currentRE = 0;
+    for (let i = 0; i < 5; i++) {
+        retainedEarnings[i] = currentRE;
+        currentRE += netIncomeByYear[i];
+    }
+
+    const totalEquity = years.map(i => shareCapital[i] + retainedEarnings[i] + netIncomeByYear[i]);
+    const totalLiabilities = years.map(i => defRevBalance[i] + accruedFeesBalance[i]);
+
       return {
         platformMetricsStreams: aggregateStreams(ptFin.platformMetricsStreams, ukFin.platformMetricsStreams, true),
         revenueStreams: aggregateStreams(ptFin.revenueStreams, ukFin.revenueStreams),
@@ -625,6 +795,21 @@ export default function App() {
         grossMarginPercentByYear,
         opProfitByYear,
         opProfitPercentByYear,
+        netIncomeByYear,
+        taxByYear,
+        defRevBalance,
+        accruedFeesBalance,
+        increaseDefRev,
+        increaseAccruedFees,
+        cashFromOp,
+        cashFromFinancing,
+        netIncreaseInCash,
+        cashBalanceBeginning,
+        cashBalanceEnd,
+        shareCapital,
+        retainedEarnings,
+        totalEquity,
+        totalLiabilities,
         totalRevenue,
         totalGrossRevenue,
         totalVariableCosts,
@@ -1131,16 +1316,14 @@ export default function App() {
         } else if (name === 'Customer acquisition costs') {
           const unitCacProvidersRow = metricRowMap['Unit CAC - Providers'];
           const unitCacOwnersRow = metricRowMap['Unit CAC - Owners'];
+          const newProvidersRow = metricRowMap['New providers added'];
+          const newOwnersRow = metricRowMap['New owners added'];
           years.forEach(y => {
             const colIdx = 2 + y;
-            const p = getCellRef(colIdx, providersRow);
-            const o = getCellRef(colIdx, ownersRow);
             const ucp = getCellRef(colIdx, unitCacProvidersRow);
             const uco = getCellRef(colIdx, unitCacOwnersRow);
-            const prevP = y > 0 ? getCellRef(colIdx - 1, providersRow) : "0";
-            const prevO = y > 0 ? getCellRef(colIdx - 1, ownersRow) : "0";
-            const newP = `MAX(0, ${p}-${prevP})`;
-            const newO = `MAX(0, ${o}-${prevO})`;
+            const newP = getCellRef(colIdx, newProvidersRow);
+            const newO = getCellRef(colIdx, newOwnersRow);
             rowData.push({ formula: `(${newP}*${ucp}) + (${newO}*${uco})` });
           });
         } else if (name === 'Customer Support') {
@@ -1749,6 +1932,26 @@ export default function App() {
             }`}
           >
             Gross Margin
+          </button>
+          <button
+            onClick={() => setActiveTab('cash-flow')}
+            className={`pb-4 px-2 text-sm font-medium transition-colors border-b-2 ${
+              activeTab === 'cash-flow'
+                ? 'border-indigo-600 text-indigo-600'
+                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+            }`}
+          >
+            Cash Flow
+          </button>
+          <button
+            onClick={() => setActiveTab('balance-sheet')}
+            className={`pb-4 px-2 text-sm font-medium transition-colors border-b-2 ${
+              activeTab === 'balance-sheet'
+                ? 'border-indigo-600 text-indigo-600'
+                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+            }`}
+          >
+            Balance Sheet
           </button>
         </div>
 
@@ -2520,6 +2723,261 @@ export default function App() {
                   </BarChart>
                 </ResponsiveContainer>
               </div>
+            </div>
+          </div>
+        </div>
+        <div className={activeTab === 'cash-flow' ? 'block' : 'opacity-0 pointer-events-none absolute -z-10 w-full'}>
+          <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative group">
+            <div className="flex justify-between items-start mb-6">
+              <div className="flex items-center space-x-3">
+                <h2 className="text-xl font-semibold flex items-center space-x-2">
+                  <Activity className="w-6 h-6 text-indigo-600" />
+                  <span>Cash Flow Statement</span>
+                </h2>
+                <MarketFlags market={activeMarket} />
+              </div>
+            </div>
+            
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    <th className="text-left py-3 px-2 font-semibold text-slate-600">Metric</th>
+                    {years.map(y => (
+                      <th key={y} className="text-right py-3 px-2 font-semibold text-slate-600">Year {y + 1}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b border-slate-50 bg-slate-50/50">
+                    <td colSpan={6} className="py-2 px-2 font-bold text-slate-900">Cash Flow from Operating Activities</td>
+                  </tr>
+                  <tr className="border-b border-slate-50">
+                    <td className="py-2 px-2 font-medium text-slate-700 pl-4">Net Income</td>
+                    {years.map(y => (
+                      <td key={y} className={`text-right py-2 px-2 font-mono whitespace-nowrap ${netIncomeByYear[y] >= 0 ? 'text-slate-600' : 'text-red-600'}`}>{formatCurrency(netIncomeByYear[y])}</td>
+                    ))}
+                  </tr>
+                  <tr className="border-b border-slate-50">
+                    <td className="py-2 px-2 font-medium text-slate-700 pl-4">Depreciation & Amortization</td>
+                    {years.map(y => (
+                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-600">€0</td>
+                    ))}
+                  </tr>
+                  <tr className="border-b border-slate-50">
+                    <td className="py-2 px-2 font-medium text-slate-700 pl-4">Changes in Working Capital:</td>
+                    {years.map(y => (
+                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap"></td>
+                    ))}
+                  </tr>
+                  <tr className="border-b border-slate-50">
+                    <td className="py-2 px-2 text-sm text-slate-600 pl-8">(+) Increase in Deferred Revenue</td>
+                    {years.map(y => (
+                      <td key={y} className={`text-right py-2 px-2 font-mono whitespace-nowrap ${increaseDefRev[y] >= 0 ? 'text-slate-600' : 'text-red-600'}`}>{formatCurrency(increaseDefRev[y])}</td>
+                    ))}
+                  </tr>
+                  <tr className="border-b border-slate-50">
+                    <td className="py-2 px-2 text-sm text-slate-600 pl-8">(+) Increase in Accrued Provider Fees</td>
+                    {years.map(y => (
+                      <td key={y} className={`text-right py-2 px-2 font-mono whitespace-nowrap ${increaseAccruedFees[y] >= 0 ? 'text-slate-600' : 'text-red-600'}`}>{formatCurrency(increaseAccruedFees[y])}</td>
+                    ))}
+                  </tr>
+                  <tr className="border-b border-slate-50 bg-indigo-50/20">
+                    <td className="py-2 px-2 font-semibold text-indigo-800 pl-4">= Net Cash from Operating Activities</td>
+                    {years.map(y => (
+                      <td key={y} className={`text-right py-2 px-2 font-bold font-mono whitespace-nowrap ${cashFromOp[y] >= 0 ? 'text-indigo-700' : 'text-red-700'}`}>{formatCurrency(cashFromOp[y])}</td>
+                    ))}
+                  </tr>
+
+                  <tr className="border-b border-slate-50 bg-slate-50/50">
+                    <td colSpan={6} className="py-2 px-2 font-bold text-slate-900 pt-6">Cash Flow from Investing Activities</td>
+                  </tr>
+                  <tr className="border-b border-slate-50">
+                    <td className="py-2 px-2 font-medium text-slate-700 pl-4">(-) Capital Expenditures (CapEx / IT)</td>
+                    {years.map(y => (
+                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-600">€0</td>
+                    ))}
+                  </tr>
+                  <tr className="border-b border-slate-50 bg-indigo-50/20">
+                    <td className="py-2 px-2 font-semibold text-indigo-800 pl-4">= Net Cash from Investing Activities</td>
+                    {years.map(y => (
+                      <td key={y} className="text-right py-2 px-2 font-bold font-mono whitespace-nowrap text-slate-600">€0</td>
+                    ))}
+                  </tr>
+
+                  <tr className="border-b border-slate-50 bg-slate-50/50">
+                    <td colSpan={6} className="py-2 px-2 font-bold text-slate-900 pt-6">Cash Flow from Financing Activities</td>
+                  </tr>
+                  <tr className="border-b border-slate-50">
+                    <td className="py-2 px-2 font-medium text-slate-700 pl-4">(+) Issuance of Share Capital (Equity)</td>
+                    {years.map(y => (
+                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-600">{formatCurrency(cashFromFinancing[y])}</td>
+                    ))}
+                  </tr>
+                  <tr className="border-b border-slate-50 bg-indigo-50/20">
+                    <td className="py-2 px-2 font-semibold text-indigo-800 pl-4">= Net Cash from Financing Activities</td>
+                    {years.map(y => (
+                      <td key={y} className="text-right py-2 px-2 font-bold font-mono whitespace-nowrap text-slate-600">{formatCurrency(cashFromFinancing[y])}</td>
+                    ))}
+                  </tr>
+
+                  <tr className="border-b border-slate-100 bg-slate-100/50">
+                    <td className="py-3 px-2 font-bold text-slate-900">Net Increase in Cash for the Period</td>
+                    {years.map(y => (
+                      <td key={y} className={`text-right py-3 px-2 font-bold font-mono whitespace-nowrap ${netIncreaseInCash[y] >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatCurrency(netIncreaseInCash[y])}</td>
+                    ))}
+                  </tr>
+                  <tr className="border-b border-slate-50">
+                    <td className="py-2 px-2 font-medium text-slate-600 text-sm">Cash Balance at Beginning of Period</td>
+                    {years.map(y => (
+                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-500 text-sm">{formatCurrency(cashBalanceBeginning[y])}</td>
+                    ))}
+                  </tr>
+                  <tr className="border-b border-slate-50 bg-emerald-50/20">
+                    <td className="py-3 px-2 font-bold text-emerald-800">Cash Balance at End of Period</td>
+                    {years.map(y => (
+                      <td key={y} className={`text-right py-3 px-2 font-bold font-mono whitespace-nowrap ${cashBalanceEnd[y] >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatCurrency(cashBalanceEnd[y])}</td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div className={activeTab === 'balance-sheet' ? 'block' : 'opacity-0 pointer-events-none absolute -z-10 w-full'}>
+          <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative group">
+            <div className="flex justify-between items-start mb-6">
+              <div className="flex items-center space-x-3">
+                <h2 className="text-xl font-semibold flex items-center space-x-2">
+                  <Calculator className="w-6 h-6 text-indigo-600" />
+                  <span>Balance Sheet</span>
+                </h2>
+                <MarketFlags market={activeMarket} />
+              </div>
+            </div>
+            
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    <th className="text-left py-3 px-2 font-semibold text-slate-600">Metric</th>
+                    {years.map(y => (
+                      <th key={y} className="text-right py-3 px-2 font-semibold text-slate-600">Year {y + 1}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b border-slate-50 bg-indigo-50/30">
+                    <td colSpan={6} className="py-3 px-2 font-bold text-indigo-900">ASSETS</td>
+                  </tr>
+                  <tr className="border-b border-slate-50 bg-slate-50/50">
+                    <td colSpan={6} className="py-2 px-2 font-semibold text-slate-700 pl-4">Current Assets</td>
+                  </tr>
+                  <tr className="border-b border-slate-50">
+                    <td className="py-2 px-2 font-medium text-slate-600 pl-8">Cash & Cash Equivalents</td>
+                    {years.map(y => (
+                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-700">{formatCurrency(cashBalanceEnd[y])}</td>
+                    ))}
+                  </tr>
+                  <tr className="border-b border-slate-50">
+                    <td className="py-2 px-2 font-medium text-slate-600 pl-8">Accounts Receivable</td>
+                    {years.map(y => (
+                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-600">€0</td>
+                    ))}
+                  </tr>
+                  <tr className="border-b border-slate-50 bg-slate-50/50">
+                    <td colSpan={6} className="py-2 px-2 font-semibold text-slate-700 pl-4 pt-4">Non-Current Assets</td>
+                  </tr>
+                  <tr className="border-b border-slate-50">
+                    <td className="py-2 px-2 font-medium text-slate-600 pl-8">Intangible Assets (Software)</td>
+                    {years.map(y => (
+                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-600">€0</td>
+                    ))}
+                  </tr>
+                  <tr className="border-b border-slate-50">
+                    <td className="py-2 px-2 font-medium text-slate-600 pl-8">Property, Plant & Equipment (PPE)</td>
+                    {years.map(y => (
+                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-600">€0</td>
+                    ))}
+                  </tr>
+                  <tr className="border-b-2 border-indigo-200 bg-indigo-50/50">
+                    <td className="py-3 px-2 font-bold text-indigo-900">TOTAL ASSETS</td>
+                    {years.map(y => (
+                      <td key={y} className="text-right py-3 px-2 font-bold font-mono whitespace-nowrap text-indigo-900">{formatCurrency(cashBalanceEnd[y])}</td>
+                    ))}
+                  </tr>
+
+                  <tr className="border-b border-slate-50 bg-indigo-50/30">
+                    <td colSpan={6} className="py-3 px-2 font-bold text-indigo-900 pt-6">LIABILITIES</td>
+                  </tr>
+                  <tr className="border-b border-slate-50 bg-slate-50/50">
+                    <td colSpan={6} className="py-2 px-2 font-semibold text-slate-700 pl-4">Current Liabilities</td>
+                  </tr>
+                  <tr className="border-b border-slate-50">
+                    <td className="py-2 px-2 font-medium text-slate-600 pl-8">Deferred Revenue</td>
+                    {years.map(y => (
+                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-700">{formatCurrency(defRevBalance[y])}</td>
+                    ))}
+                  </tr>
+                  <tr className="border-b border-slate-50">
+                    <td className="py-2 px-2 font-medium text-slate-600 pl-8">Accrued Provider Fees</td>
+                    {years.map(y => (
+                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-700">{formatCurrency(accruedFeesBalance[y])}</td>
+                    ))}
+                  </tr>
+                  <tr className="border-b border-slate-50 bg-slate-50/50">
+                    <td colSpan={6} className="py-2 px-2 font-semibold text-slate-700 pl-4 pt-4">Non-Current Liabilities</td>
+                  </tr>
+                  <tr className="border-b border-slate-50">
+                    <td className="py-2 px-2 font-medium text-slate-600 pl-8">Long-Term Debt</td>
+                    {years.map(y => (
+                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-600">€0</td>
+                    ))}
+                  </tr>
+                  <tr className="border-b-2 border-indigo-200 bg-indigo-50/20">
+                    <td className="py-3 px-2 font-bold text-indigo-900 pl-4">TOTAL LIABILITIES</td>
+                    {years.map(y => (
+                      <td key={y} className="text-right py-3 px-2 font-bold font-mono whitespace-nowrap text-indigo-800">{formatCurrency(totalLiabilities[y])}</td>
+                    ))}
+                  </tr>
+
+                  <tr className="border-b border-slate-50 bg-indigo-50/30">
+                    <td colSpan={6} className="py-3 px-2 font-bold text-indigo-900 pt-6">EQUITY</td>
+                  </tr>
+                  <tr className="border-b border-slate-50">
+                    <td className="py-2 px-2 font-medium text-slate-600 pl-8">Share Capital</td>
+                    {years.map(y => (
+                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-700">{formatCurrency(shareCapital[y])}</td>
+                    ))}
+                  </tr>
+                  <tr className="border-b border-slate-50">
+                    <td className="py-2 px-2 font-medium text-slate-600 pl-8">Retained Earnings</td>
+                    {years.map(y => (
+                      <td key={y} className={`text-right py-2 px-2 font-mono whitespace-nowrap ${retainedEarnings[y] >= 0 ? 'text-slate-700' : 'text-red-600'}`}>{formatCurrency(retainedEarnings[y])}</td>
+                    ))}
+                  </tr>
+                  <tr className="border-b border-slate-50">
+                    <td className="py-2 px-2 font-medium text-slate-600 pl-8">Net Income</td>
+                    {years.map(y => (
+                      <td key={y} className={`text-right py-2 px-2 font-mono whitespace-nowrap ${netIncomeByYear[y] >= 0 ? 'text-slate-700' : 'text-red-600'}`}>{formatCurrency(netIncomeByYear[y])}</td>
+                    ))}
+                  </tr>
+                  <tr className="border-b-2 border-indigo-200 bg-indigo-50/20">
+                    <td className="py-3 px-2 font-bold text-indigo-900 pl-4">TOTAL EQUITY</td>
+                    {years.map(y => (
+                      <td key={y} className={`text-right py-3 px-2 font-bold font-mono whitespace-nowrap ${totalEquity[y] >= 0 ? 'text-indigo-800' : 'text-red-800'}`}>{formatCurrency(totalEquity[y])}</td>
+                    ))}
+                  </tr>
+
+                  <tr className="bg-slate-900 text-white mt-4">
+                    <td className="py-4 px-4 font-bold text-lg">TOTAL LIABILITIES & EQUITY</td>
+                    {years.map(y => (
+                      <td key={y} className="text-right py-4 px-4 font-bold font-mono whitespace-nowrap">{formatCurrency(totalLiabilities[y] + totalEquity[y])}</td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
