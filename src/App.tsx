@@ -41,13 +41,13 @@ const DEFAULT_PLATFORM_METRICS: FinancialStream[] = [
   { id: 'pm-cs-providers', name: 'Unit Customer Support cost - Providers', amounts: ['', '', '', '', ''], isPermanent: true },
   { id: 'pm-cs-owners', name: 'Unit Customer Support cost - Owners', amounts: ['', '', '', '', ''], isPermanent: true },
   { id: 'pm-payment-fee-percent', name: 'Payment Fee %', amounts: [2.9, 2.9, 2.9, 2.9, 2.9], isPermanent: true },
-  { id: 'pm-payment-fee-per-tx', name: 'Payment Fee per Transaction', amounts: [0.30, 0.30, 0.30, 0.30, 0.30], isPermanent: true }
+  { id: 'pm-payment-fee-per-tx', name: 'Payment Fee per Transaction', amounts: [0.30, 0.30, 0.30, 0.30, 0.30], isPermanent: true },
+  { id: 'pm-cross-charge', name: 'Cross-charge to UK (%)', amounts: ['', '', '', '', ''], isPermanent: true }
 ];
 
 const DEFAULT_REVENUE_STREAMS: FinancialStream[] = [
   { id: 'rev-1', name: 'Monthly Subscriptions', amounts: ['', '', '', '', ''], isPermanent: true },
-  { id: 'rev-2', name: 'Booking Fees', amounts: ['', '', '', '', ''], isPermanent: true },
-  { id: 'rev-3', name: 'Others', amounts: ['', '', '', '', ''], isPermanent: true }
+  { id: 'rev-2', name: 'Booking Fees', amounts: ['', '', '', '', ''], isPermanent: true }
 ];
 
 const DEFAULT_VARIABLE_COSTS_STREAMS: FinancialStream[] = [
@@ -60,15 +60,22 @@ const DEFAULT_VARIABLE_COSTS_STREAMS: FinancialStream[] = [
 const DEFAULT_FIXED_COSTS_STREAMS: FinancialStream[] = [
   { id: 'fc-1', name: 'Rent', amounts: ['', '', '', '', ''] },
   { id: 'fc-2', name: 'Salaries', amounts: ['', '', '', '', ''] },
-  { id: 'fc-3', name: 'Advertisement', amounts: ['', '', '', '', ''], isPermanent: true },
+  { id: 'fc-3', name: 'Advertisement & Promotion', amounts: ['', '', '', '', ''], isPermanent: true },
   { id: 'fc-4', name: 'IT R&D and Support', amounts: ['', '', '', '', ''], isPermanent: true },
   { id: 'fc-ga', name: 'G&A expenses', amounts: ['', '', '', '', ''], isPermanent: true }
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'financials' | 'platform' | 'gross-margin' | 'cash-flow' | 'balance-sheet'>('financials');
+  const [activeTab, setActiveTab] = useState<'financials' | 'platform' | 'gross-margin' | 'cash-flow' | 'balance-sheet' | 'sensitivity'>('financials');
   const [activeMarket, setActiveMarket] = useState<Market>('Portugal');
   const [copiedChart, setCopiedChart] = useState<string | null>(null);
+  
+  // Sensitivity Analysis Modifiers (Percentages)
+  const [sensitivityMods, setSensitivityMods] = useState({
+    revenue: 0,
+    cogs: 0,
+    fixedCosts: 0
+  });
 
   const providerAnalysisRef = useRef<HTMLDivElement>(null);
   const ownerAnalysisRef = useRef<HTMLDivElement>(null);
@@ -84,6 +91,9 @@ export default function App() {
   const grossMarginChartRef = useRef<HTMLDivElement>(null);
   const financialOverviewChartRef = useRef<HTMLDivElement>(null);
   const viabilityComparisonChartRef = useRef<HTMLDivElement>(null);
+  const bookingsChartRef = useRef<HTMLDivElement>(null);
+  const cashFlowRef = useRef<HTMLDivElement>(null);
+  const balanceSheetRef = useRef<HTMLDivElement>(null);
 
   const downloadChart = async (ref: React.RefObject<HTMLDivElement>, filename: string) => {
     if (ref.current) {
@@ -154,19 +164,25 @@ export default function App() {
   };
 
   const [markets, setMarkets] = useState<Record<'Portugal' | 'UK', MarketData>>(() => {
-    const defaultMarketData = (): MarketData => ({
-      platformMetricsStreams: [...DEFAULT_PLATFORM_METRICS],
-      revenueStreams: [...DEFAULT_REVENUE_STREAMS],
-      variableCostsStreams: [...DEFAULT_VARIABLE_COSTS_STREAMS],
-      fixedCostsStreams: [...DEFAULT_FIXED_COSTS_STREAMS],
-      chargeSubscription: [false, false, false, false, false],
-      chargeBookingFees: [false, false, false, false, false],
-    });
+    const defaultMarketData = (marketName: 'Portugal' | 'UK'): MarketData => {
+      const pm = [...DEFAULT_PLATFORM_METRICS];
+      if (marketName === 'UK') {
+        pm.push({ id: 'pm-fx-rate', name: 'FX rate (GBP / EUR)', amounts: [1.16, 1.16, 1.16, 1.16, 1.16], isPermanent: true });
+      }
+      return {
+        platformMetricsStreams: pm,
+        revenueStreams: [...DEFAULT_REVENUE_STREAMS],
+        variableCostsStreams: [...DEFAULT_VARIABLE_COSTS_STREAMS],
+        fixedCostsStreams: [...DEFAULT_FIXED_COSTS_STREAMS],
+        chargeSubscription: [false, false, false, false, false],
+        chargeBookingFees: [false, false, false, false, false],
+      };
+    };
 
     const saved = localStorage.getItem('marketsData');
     if (saved) {
       const parsed = JSON.parse(saved);
-      const upgrade = (market: MarketData): MarketData => {
+      const upgrade = (market: MarketData, marketName: 'Portugal' | 'UK'): MarketData => {
         const syncStreams = (current: FinancialStream[], defaults: FinancialStream[]) => {
           const result: FinancialStream[] = [];
           
@@ -195,19 +211,29 @@ export default function App() {
           return result;
         };
 
-        const base = market || defaultMarketData();
+        const base = market || defaultMarketData(marketName);
+        if (base.fixedCostsStreams) {
+          base.fixedCostsStreams.forEach(s => {
+            if (s.name === 'Advertisement') s.name = 'Advertisement & Promotion';
+          });
+        }
+        const defaultsForMarket = [...DEFAULT_PLATFORM_METRICS];
+        if (marketName === 'UK') {
+          defaultsForMarket.push({ id: 'pm-fx-rate', name: 'FX rate (GBP / EUR)', amounts: [1.16, 1.16, 1.16, 1.16, 1.16], isPermanent: true });
+        }
+
         return {
           ...base,
-          platformMetricsStreams: syncStreams(base.platformMetricsStreams, DEFAULT_PLATFORM_METRICS),
-          revenueStreams: syncStreams(base.revenueStreams, DEFAULT_REVENUE_STREAMS),
+          platformMetricsStreams: syncStreams(base.platformMetricsStreams, defaultsForMarket),
+          revenueStreams: syncStreams(base.revenueStreams, DEFAULT_REVENUE_STREAMS).filter(s => s.name !== 'Others'),
           variableCostsStreams: syncStreams(base.variableCostsStreams, DEFAULT_VARIABLE_COSTS_STREAMS),
           fixedCostsStreams: syncStreams(base.fixedCostsStreams, DEFAULT_FIXED_COSTS_STREAMS),
         };
       };
 
       return {
-        Portugal: upgrade(parsed.Portugal),
-        UK: upgrade(parsed.UK)
+        Portugal: upgrade(parsed.Portugal, 'Portugal'),
+        UK: upgrade(parsed.UK, 'UK')
       };
     }
 
@@ -222,16 +248,16 @@ export default function App() {
     if (oldPlatform || oldRevenue || oldVariable || oldFixed) {
       const portugal: MarketData = {
         platformMetricsStreams: oldPlatform ? JSON.parse(oldPlatform) : [...DEFAULT_PLATFORM_METRICS],
-        revenueStreams: oldRevenue ? JSON.parse(oldRevenue) : [...DEFAULT_REVENUE_STREAMS],
+        revenueStreams: (oldRevenue ? JSON.parse(oldRevenue) : [...DEFAULT_REVENUE_STREAMS]).filter((s: FinancialStream) => s.name !== 'Others'),
         variableCostsStreams: oldVariable ? JSON.parse(oldVariable) : [...DEFAULT_VARIABLE_COSTS_STREAMS],
         fixedCostsStreams: oldFixed ? JSON.parse(oldFixed) : [...DEFAULT_FIXED_COSTS_STREAMS],
         chargeSubscription: oldChargeSub ? JSON.parse(oldChargeSub) : [false, false, false, false, false],
         chargeBookingFees: oldChargeBooking ? JSON.parse(oldChargeBooking) : [false, false, false, false, false],
       };
-      return { Portugal: portugal, UK: defaultMarketData() };
+      return { Portugal: portugal, UK: defaultMarketData('UK') };
     }
 
-    return { Portugal: defaultMarketData(), UK: defaultMarketData() };
+    return { Portugal: defaultMarketData('Portugal'), UK: defaultMarketData('UK') };
   });
 
   useEffect(() => {
@@ -240,7 +266,7 @@ export default function App() {
 
   const years = [0, 1, 2, 3, 4];
 
-  const calculateFinancials = (data: MarketData) => {
+  const calculateFinancials = (data: MarketData, marketName: 'Portugal' | 'UK') => {
     const { platformMetricsStreams, revenueStreams, variableCostsStreams, fixedCostsStreams, chargeSubscription, chargeBookingFees } = data;
 
     const derivedPlatformMetricsStreams = platformMetricsStreams.map(stream => {
@@ -417,7 +443,53 @@ export default function App() {
     });
 
     const totalVarCostsByYear = years.map(y => derivedVariableCostsStreams.reduce((sum, stream) => sum + (Number(stream.amounts[y]) || 0), 0));
-    const totalFixedCostsByYear = years.map(y => fixedCostsStreams.reduce((sum, stream) => sum + (Number(stream.amounts[y]) || 0), 0));
+
+    const derivedFixedCostsStreams = fixedCostsStreams.map(stream => ({ ...stream }));
+
+    if (marketName === 'Portugal') {
+        const itStream = fixedCostsStreams.find(s => s.name === 'IT R&D and Support');
+        const salaryStream = fixedCostsStreams.find(s => s.name === 'Salaries');
+        const crossChargeStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-cross-charge' || s.name === 'Cross-charge to UK (%)');
+        
+        const amounts = years.map(y => {
+            const it = Number(itStream?.amounts?.[y]) || 0;
+            const salary = Number(salaryStream?.amounts?.[y]) || 0;
+            const pct = (Number(crossChargeStream?.amounts?.[y]) || 0) / 100;
+            return -((it + salary) * pct);
+        });
+        derivedFixedCostsStreams.push({
+            id: 'fc-cross-charge-pt',
+            name: 'Service Recovery (IT/Salaries Cross-charge to UK)',
+            amounts,
+            isCalculated: true,
+            isPermanent: true
+        });
+    } else if (marketName === 'UK') {
+        const ptData = markets.Portugal;
+        const itStream = ptData.fixedCostsStreams.find(s => s.name === 'IT R&D and Support');
+        const salaryStream = ptData.fixedCostsStreams.find(s => s.name === 'Salaries');
+        const crossChargeStream = ptData.platformMetricsStreams.find(s => s.id === 'pm-cross-charge' || s.name === 'Cross-charge to UK (%)');
+        
+        const fxRateStream = derivedPlatformMetricsStreams.find(s => s.id === 'pm-fx-rate');
+
+        const amounts = years.map(y => {
+            const it = Number(itStream?.amounts?.[y]) || 0;
+            const salary = Number(salaryStream?.amounts?.[y]) || 0;
+            const pct = (Number(crossChargeStream?.amounts?.[y]) || 0) / 100;
+            const ptRecoveryEur = ((it + salary) * pct);
+            const fx = Number(fxRateStream?.amounts?.[y]) || 1.16;
+            return ptRecoveryEur / fx;
+        });
+        derivedFixedCostsStreams.push({
+            id: 'fc-cross-charge-uk',
+            name: 'IT & Shared Services Fee (Paid to PT)',
+            amounts,
+            isCalculated: true,
+            isPermanent: true
+        });
+    }
+
+    const totalFixedCostsByYear = years.map(y => derivedFixedCostsStreams.reduce((sum, stream) => sum + (Number(stream.amounts[y]) || 0), 0));
     const totalPlatformMetricsByYear = years.map(y => derivedPlatformMetricsStreams.reduce((sum, stream) => sum + (Number(stream.amounts[y]) || 0), 0));
 
     const grossMarginByYear = years.map(y => totalRevenueByYear[y] - totalVarCostsByYear[y]);
@@ -436,7 +508,12 @@ export default function App() {
     const calculatedOpProfitPercent = totalRevenue > 0 ? (operatingProfit / totalRevenue) * 100 : 0;
 
     const TAX_RATE = 0.21;
-    const EQUITY_INJECTION = 200000;
+    const equityInjection = [0, 0, 0, 0, 0];
+    if (marketName === 'Portugal') {
+        equityInjection[0] = 575000;
+    } else if (marketName === 'UK') {
+        equityInjection[2] = 950000;
+    }
 
     let accumulatedLoss = 0;
     const netIncomeByYear: number[] = [];
@@ -467,6 +544,9 @@ export default function App() {
         }
     }
 
+    const totalTaxes = taxByYear.reduce((a, b) => a + b, 0);
+    const totalNetIncome = netIncomeByYear.reduce((a, b) => a + b, 0);
+
     const defRevBalance = years.map(y => totalGrossRevenueByYear[y] * 0.01);
     const accruedFeesBalance = years.map(y => totalGrossRevenueByYear[y] * 0.03);
 
@@ -480,7 +560,7 @@ export default function App() {
         cashFromOp[i] = netIncomeByYear[i] + increaseDefRev[i] + increaseAccruedFees[i]; 
     }
 
-    const cashFromFinancing = [EQUITY_INJECTION, ...years.slice(1).map(() => 0)];
+    const cashFromFinancing = [...equityInjection];
 
     const netIncreaseInCash: number[] = [];
     const cashBalanceBeginning: number[] = [];
@@ -494,7 +574,13 @@ export default function App() {
         cashBalanceEnd[i] = currentCash;
     }
 
-    const shareCapital = years.map(() => EQUITY_INJECTION);
+    const shareCapital: number[] = [];
+    let cumulativeEquity = 0;
+    for (let i = 0; i < 5; i++) {
+        cumulativeEquity += equityInjection[i];
+        shareCapital[i] = cumulativeEquity;
+    }
+
     const retainedEarnings: number[] = [];
     let currentRE = 0;
     
@@ -510,6 +596,7 @@ export default function App() {
       platformMetricsStreams: derivedPlatformMetricsStreams,
       derivedRevenueStreams,
       derivedVariableCostsStreams,
+      derivedFixedCostsStreams,
       totalRevenueByYear,
       totalGrossRevenueByYear,
       totalVarCostsByYear,
@@ -541,6 +628,8 @@ export default function App() {
       totalPlatformMetrics,
       grossMargin,
       operatingProfit,
+      totalTaxes,
+      totalNetIncome,
       calculatedMarginPercent,
       calculatedOpProfitPercent
     };
@@ -563,6 +652,7 @@ export default function App() {
     chargeBookingFees,
     derivedRevenueStreams,
     derivedVariableCostsStreams,
+    derivedFixedCostsStreams,
     totalRevenueByYear,
     totalGrossRevenueByYear,
     totalVarCostsByYear,
@@ -594,14 +684,82 @@ export default function App() {
     totalPlatformMetrics,
     grossMargin,
     operatingProfit,
+    totalTaxes,
+    totalNetIncome,
     calculatedMarginPercent,
     calculatedOpProfitPercent
   } = React.useMemo(() => {
     if (activeMarket === 'Aggregated') {
       const pt = markets.Portugal;
       const uk = markets.UK;
-      const ptFin = { ...pt, ...calculateFinancials(pt) };
-      const ukFin = { ...uk, ...calculateFinancials(uk) };
+      const ptFin = { ...pt, ...calculateFinancials(pt, 'Portugal') };
+      const rawUkFin = { ...uk, ...calculateFinancials(uk, 'UK') };
+
+      const applyFxToUkFin = (fin: typeof rawUkFin): typeof rawUkFin => {
+        const getFxRate = (y: number) => {
+          const fxRateStream = fin.platformMetricsStreams.find(s => s.id === 'pm-fx-rate');
+          return fxRateStream ? (Number(fxRateStream.amounts[y]) || 1.16) : 1.16;
+        };
+
+        const convertArr = (arr: number[]) => arr.map((v, y) => v * getFxRate(y));
+
+        const convertStreams = (streams: FinancialStream[], checkCurrency = false) => 
+          streams.map(s => {
+            const isCurr = checkCurrency ? ['Avg price per booking', 'Monthly Subscription fee', 'Unit CAC - Providers', 'Unit CAC - Owners', 'Unit Customer Support cost - Providers', 'Unit Customer Support cost - Owners', 'Payment Fee per Transaction'].includes(s.name) : true;
+            if (!isCurr || s.id === 'pm-fx-rate') return s;
+            return {
+              ...s,
+              amounts: s.amounts.map((v, y) => {
+                const num = Number(v);
+                return isNaN(num) ? v : Number((num * getFxRate(y)).toFixed(2));
+              })
+            };
+          });
+
+        return {
+          ...fin,
+          platformMetricsStreams: convertStreams(fin.platformMetricsStreams, true),
+          revenueStreams: convertStreams(fin.revenueStreams),
+          derivedRevenueStreams: convertStreams(fin.derivedRevenueStreams),
+          variableCostsStreams: convertStreams(fin.variableCostsStreams),
+          fixedCostsStreams: convertStreams(fin.fixedCostsStreams),
+          derivedVariableCostsStreams: convertStreams(fin.derivedVariableCostsStreams),
+          derivedFixedCostsStreams: convertStreams(fin.derivedFixedCostsStreams),
+          
+          totalRevenueByYear: convertArr(fin.totalRevenueByYear),
+          totalGrossRevenueByYear: convertArr(fin.totalGrossRevenueByYear),
+          totalVarCostsByYear: convertArr(fin.totalVarCostsByYear),
+          totalFixedCostsByYear: convertArr(fin.totalFixedCostsByYear),
+          grossMarginByYear: convertArr(fin.grossMarginByYear),
+          opProfitByYear: convertArr(fin.opProfitByYear),
+          netIncomeByYear: convertArr(fin.netIncomeByYear),
+          taxByYear: convertArr(fin.taxByYear),
+          defRevBalance: convertArr(fin.defRevBalance),
+          accruedFeesBalance: convertArr(fin.accruedFeesBalance),
+          increaseDefRev: convertArr(fin.increaseDefRev),
+          increaseAccruedFees: convertArr(fin.increaseAccruedFees),
+          cashFromOp: convertArr(fin.cashFromOp),
+          cashFromFinancing: convertArr(fin.cashFromFinancing),
+          netIncreaseInCash: convertArr(fin.netIncreaseInCash),
+          cashBalanceBeginning: convertArr(fin.cashBalanceBeginning),
+          cashBalanceEnd: convertArr(fin.cashBalanceEnd),
+          shareCapital: convertArr(fin.shareCapital),
+          retainedEarnings: convertArr(fin.retainedEarnings),
+          totalEquity: convertArr(fin.totalEquity),
+          totalLiabilities: convertArr(fin.totalLiabilities),
+
+          totalRevenue: convertArr(fin.totalRevenueByYear).reduce((a,b)=>a+b,0),
+          totalGrossRevenue: convertArr(fin.totalGrossRevenueByYear).reduce((a,b)=>a+b,0),
+          totalVariableCosts: convertArr(fin.totalVarCostsByYear).reduce((a,b)=>a+b,0),
+          fixedCosts: convertArr(fin.totalFixedCostsByYear).reduce((a,b)=>a+b,0),
+          grossMargin: convertArr(fin.grossMarginByYear).reduce((a,b)=>a+b,0),
+          operatingProfit: convertArr(fin.opProfitByYear).reduce((a,b)=>a+b,0),
+          totalTaxes: convertArr(fin.taxByYear).reduce((a,b)=>a+b,0),
+          totalNetIncome: convertArr(fin.netIncomeByYear).reduce((a,b)=>a+b,0)
+        };
+      };
+
+      const ukFin = applyFxToUkFin(rawUkFin);
 
       const aggregateStreams = (s1: FinancialStream[], s2: FinancialStream[], isPlatformMetrics = false) => {
         const allNames = Array.from(new Set([...s1.map(s => s.name), ...s2.map(s => s.name)]));
@@ -669,8 +827,11 @@ export default function App() {
                 result = totalW > 0 ? (metricVal1 * w1 + metricVal2 * w2) / totalW : (metricVal1 + metricVal2) / 2;
               } else {
                 result = metricVal1 + metricVal2;
+                if (name === 'FX rate (GBP / EUR)') {
+                  result = metricVal2; // Only UK has this, return its value
+                }
               }
-              return Math.round(result);
+              return Number(result.toFixed(2));
             }
 
             return metricVal1 + metricVal2;
@@ -708,7 +869,6 @@ export default function App() {
       const opProfitPercentByYear = years.map(y => totalRevenueByYear[y] > 0 ? (opProfitByYear[y] / totalRevenueByYear[y]) * 100 : 0);
 
     const TAX_RATE = 0.21;
-    const EQUITY_INJECTION = 200000;
 
     let accumulatedLoss = 0;
     const netIncomeByYear: number[] = [];
@@ -739,6 +899,9 @@ export default function App() {
         }
     }
 
+    const totalTaxes = taxByYear.reduce((a, b) => a + b, 0);
+    const totalNetIncome = netIncomeByYear.reduce((a, b) => a + b, 0);
+
     const defRevBalance = years.map(y => totalGrossRevenueByYear[y] * 0.01);
     const accruedFeesBalance = years.map(y => totalGrossRevenueByYear[y] * 0.03);
 
@@ -752,7 +915,7 @@ export default function App() {
         cashFromOp[i] = netIncomeByYear[i] + increaseDefRev[i] + increaseAccruedFees[i]; 
     }
 
-    const cashFromFinancing = [EQUITY_INJECTION, ...years.slice(1).map(() => 0)];
+    const cashFromFinancing = years.map(i => ptFin.cashFromFinancing[i] + ukFin.cashFromFinancing[i]);
 
     const netIncreaseInCash: number[] = [];
     const cashBalanceBeginning: number[] = [];
@@ -766,7 +929,7 @@ export default function App() {
         cashBalanceEnd[i] = currentCash;
     }
 
-    const shareCapital = years.map(() => EQUITY_INJECTION);
+    const shareCapital = years.map(i => ptFin.shareCapital[i] + ukFin.shareCapital[i]);
     const retainedEarnings: number[] = [];
     let currentRE = 0;
     for (let i = 0; i < 5; i++) {
@@ -784,6 +947,7 @@ export default function App() {
         fixedCostsStreams: aggregateStreams(ptFin.fixedCostsStreams, ukFin.fixedCostsStreams),
         derivedRevenueStreams: aggregateStreams(ptFin.derivedRevenueStreams, ukFin.derivedRevenueStreams),
         derivedVariableCostsStreams: aggregateStreams(ptFin.derivedVariableCostsStreams, ukFin.derivedVariableCostsStreams),
+        derivedFixedCostsStreams: aggregateStreams(ptFin.derivedFixedCostsStreams, ukFin.derivedFixedCostsStreams),
         chargeSubscription: ptFin.chargeSubscription.map((v, i) => v || ukFin.chargeSubscription[i]),
         chargeBookingFees: ptFin.chargeBookingFees.map((v, i) => v || ukFin.chargeBookingFees[i]),
         totalRevenueByYear,
@@ -817,6 +981,8 @@ export default function App() {
         totalPlatformMetrics,
         grossMargin,
         operatingProfit,
+        totalTaxes,
+        totalNetIncome,
         calculatedMarginPercent,
         calculatedOpProfitPercent
       };
@@ -824,14 +990,94 @@ export default function App() {
     const currentMarketData = markets[activeMarket];
     return {
       ...currentMarketData,
-      ...calculateFinancials(currentMarketData)
+      ...calculateFinancials(currentMarketData, activeMarket as 'Portugal' | 'UK')
     };
   }, [activeMarket, markets]);
+
+  const sensitivityData = React.useMemo(() => {
+    const data = {
+      grossRev: [] as number[],
+      netRev: [] as number[],
+      cogs: [] as number[],
+      margin: [] as number[],
+      fixedCosts: [] as number[],
+      opProfit: [] as number[],
+      netIncome: [] as number[]
+    };
+    let accumulatedLoss = 0;
+
+    for (let y = 0; y < 5; y++) {
+      const grossRev = totalGrossRevenueByYear[y] * (1 + sensitivityMods.revenue / 100);
+      const netRev = totalRevenueByYear[y] * (1 + sensitivityMods.revenue / 100);
+      const cogs = totalVarCostsByYear[y] * (1 + sensitivityMods.cogs / 100);
+      const fc = totalFixedCostsByYear[y] * (1 + sensitivityMods.fixedCosts / 100);
+      
+      const margin = netRev - cogs;
+      const ebit = margin - fc;
+
+      data.grossRev.push(grossRev);
+      data.netRev.push(netRev);
+      data.cogs.push(cogs);
+      data.margin.push(margin);
+      data.fixedCosts.push(fc);
+      data.opProfit.push(ebit);
+
+      if (ebit < 0) {
+        accumulatedLoss += Math.abs(ebit);
+        data.netIncome.push(ebit);
+      } else {
+        let taxableIncome = 0;
+        if (accumulatedLoss > 0) {
+          if (ebit > accumulatedLoss) {
+            taxableIncome = ebit - accumulatedLoss;
+            accumulatedLoss = 0;
+          } else {
+            taxableIncome = 0;
+            accumulatedLoss -= ebit;
+          }
+        } else {
+          taxableIncome = ebit;
+        }
+        const tax = taxableIncome * 0.21;
+        data.netIncome.push(ebit - tax);
+      }
+    }
+
+    const totals = {
+      grossRev: data.grossRev.reduce((a, b) => a + b, 0),
+      netRev: data.netRev.reduce((a, b) => a + b, 0),
+      cogs: data.cogs.reduce((a, b) => a + b, 0),
+      margin: data.margin.reduce((a, b) => a + b, 0),
+      fixedCosts: data.fixedCosts.reduce((a, b) => a + b, 0),
+      opProfit: data.opProfit.reduce((a, b) => a + b, 0),
+      netIncome: data.netIncome.reduce((a, b) => a + b, 0)
+    };
+
+    const getBookingsTotal = (marketCode: 'Portugal' | 'UK') => {
+      const derived = calculateFinancials(markets[marketCode], marketCode);
+      const owners = derived.platformMetricsStreams.find(s => s.name === 'Number of owners in the platform');
+      const bp = derived.platformMetricsStreams.find(s => s.name === '# of yearly bookings per pet owners');
+      let sum = 0;
+      for (let i = 0; i < 5; i++) {
+        sum += (Number(owners?.amounts?.[i]) || 0) * (Number(bp?.amounts?.[i]) || 0);
+      }
+      return sum;
+    };
+
+    return { 
+      data, 
+      totals, 
+      ptBookings: getBookingsTotal('Portugal'), 
+      ukBookings: getBookingsTotal('UK') 
+    };
+  }, [totalGrossRevenueByYear, totalRevenueByYear, totalVarCostsByYear, totalFixedCostsByYear, sensitivityMods, markets]);
+
+  const getCurrencySymbol = () => activeMarket === 'UK' ? '£' : '€';
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
-      currency: 'EUR',
+      currency: activeMarket === 'UK' ? 'GBP' : 'EUR',
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     }).format(value);
@@ -940,6 +1186,7 @@ export default function App() {
       'New Owners': getVal('New owners added'),
       'Total Owners': getVal('Number of owners in the platform'),
       'Owner Churn': getVal('Owner churn rate (%)'),
+      'Number of Bookings': getVal('Number of owners in the platform') * getVal('# of yearly bookings per pet owners'),
     };
   });
 
@@ -949,12 +1196,13 @@ export default function App() {
   };
 
   const formatCompactCurrency = (value: number) => {
-    if (value === 0) return '€0';
+    const sym = getCurrencySymbol();
+    if (value === 0) return `${sym}0`;
     const absVal = Math.abs(value);
     const sign = value < 0 ? '-' : '';
-    if (absVal >= 1000000) return `${sign}€${(absVal / 1000000).toFixed(1)}M`;
-    if (absVal >= 1000) return `${sign}€${(absVal / 1000).toFixed(0)}k`;
-    return `${sign}€${absVal}`;
+    if (absVal >= 1000000) return `${sign}${sym}${(absVal / 1000000).toFixed(1)}M`;
+    if (absVal >= 1000) return `${sign}${sym}${(absVal / 1000).toFixed(0)}k`;
+    return `${sign}${sym}${absVal}`;
   };
 
   const exportToCSV = () => {
@@ -976,7 +1224,7 @@ export default function App() {
     rows.push(['COGS Total', '', ...totalVarCostsByYear.map(String), String(totalVariableCosts)]);
     
     // Fixed Costs
-    fixedCostsStreams.forEach(stream => {
+    derivedFixedCostsStreams.forEach(stream => {
       rows.push(['Fixed Cost', stream.name, ...stream.amounts.map(a => String(a || 0)), String(getStreamTotal(stream))]);
     });
     rows.push(['Fixed Cost Total', '', ...totalFixedCostsByYear.map(String), String(fixedCosts)]);
@@ -1023,6 +1271,7 @@ export default function App() {
       { ref: viabilityComparisonChartRef, name: 'Financial Viability Comparison' },
       { ref: providerAnalysisRef, name: 'Provider Analysis' },
       { ref: ownerAnalysisRef, name: 'Owner Analysis' },
+      { ref: bookingsChartRef, name: 'Bookings Analysis' },
       { ref: providerChurnRef, name: 'Provider Churn Trend' },
       { ref: ownerChurnRef, name: 'Owner Churn Trend' },
       { ref: grossMarginChartRef, name: 'Gross Margin Trend' }
@@ -1048,10 +1297,13 @@ export default function App() {
     const marketsToExport: Market[] = ['Portugal', 'UK', 'Aggregated'];
 
     const getColLetter = (col: number) => String.fromCharCode(65 + col);
-    const getCellRef = (col: number, row: number) => `${getColLetter(col)}${row + 1}`;
+    const getCellRef = (col: number, row: number | undefined) => {
+      if (row === undefined || isNaN(row)) return '0';
+      return `${getColLetter(col)}${row + 1}`;
+    };
 
-    const ptFin = { ...markets.Portugal, ...calculateFinancials(markets.Portugal) };
-    const ukFin = { ...markets.UK, ...calculateFinancials(markets.UK) };
+    const ptFin = { ...markets.Portugal, ...calculateFinancials(markets.Portugal, 'Portugal') };
+    const ukFin = { ...markets.UK, ...calculateFinancials(markets.UK, 'UK') };
 
     const getUnion = (s1: FinancialStream[], s2: FinancialStream[], defaults: FinancialStream[]) => {
       const names = Array.from(new Set([...s1.map(s => s.name), ...s2.map(s => s.name)]));
@@ -1068,7 +1320,7 @@ export default function App() {
     const platformUnion = getUnion(ptFin.platformMetricsStreams, ukFin.platformMetricsStreams, DEFAULT_PLATFORM_METRICS);
     const revenueUnion = getUnion(ptFin.derivedRevenueStreams, ukFin.derivedRevenueStreams, DEFAULT_REVENUE_STREAMS);
     const cogsUnion = getUnion(ptFin.derivedVariableCostsStreams, ukFin.derivedVariableCostsStreams, DEFAULT_VARIABLE_COSTS_STREAMS);
-    const fixedUnion = getUnion(ptFin.fixedCostsStreams, ukFin.fixedCostsStreams, DEFAULT_FIXED_COSTS_STREAMS);
+    const fixedUnion = getUnion(ptFin.derivedFixedCostsStreams, ukFin.derivedFixedCostsStreams, DEFAULT_FIXED_COSTS_STREAMS);
 
     marketsToExport.forEach(market => {
       const sheet = workbook.addWorksheet(market);
@@ -1087,7 +1339,7 @@ export default function App() {
         if (category === 'Platform Metric') streams = mData.platformMetricsStreams;
         if (category === 'Revenue') streams = mData.derivedRevenueStreams;
         if (category === 'COGS') streams = mData.derivedVariableCostsStreams;
-        if (category === 'Fixed Cost') streams = mData.fixedCostsStreams;
+        if (category === 'Fixed Cost') streams = mData.derivedFixedCostsStreams;
         
         const stream = streams.find(s => s.name === streamName);
         return Number(stream?.amounts?.[yearIdx]) || 0;
@@ -1095,6 +1347,9 @@ export default function App() {
 
       // Platform Metrics
       const metricRowMap: Record<string, number> = {};
+      const platformStartRowIdx = currentRow;
+      const fxRateIdxInUnion = platformUnion.indexOf('FX rate (GBP / EUR)');
+
       platformUnion.forEach(name => {
         metricRowMap[name] = currentRow;
         const rowData: any[] = ['Platform Metric', name];
@@ -1115,11 +1370,19 @@ export default function App() {
               'Payment Fee per Transaction'
             ];
 
+            const col = getColLetter(2 + y);
+            const getUkFxMulti = (colLetter: string) => fxRateIdxInUnion >= 0 ? `'UK'!${colLetter}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
+            const fxMult = getUkFxMulti(col);
+
             if (weightedMetrics.includes(name)) {
-              const col = getColLetter(2 + y);
               const row = currentRow + 1;
               const vPt = `'Portugal'!${col}${row}`;
-              const vUk = `'UK'!${col}${row}`;
+              let vUk = `'UK'!${col}${row}`;
+              
+              if (['Avg price per booking', 'Monthly Subscription fee', 'Unit CAC - Providers', 'Unit CAC - Owners', 'Unit Customer Support cost - Providers', 'Unit Customer Support cost - Owners', 'Payment Fee per Transaction'].includes(name)) {
+                vUk = `(${vUk} * ${fxMult})`;
+              }
+
               let wPt = "";
               let wUk = "";
 
@@ -1129,7 +1392,7 @@ export default function App() {
                 const aRow = metricRowMap['Avg price per booking'];
                 if (oRow !== undefined && bRow !== undefined && aRow !== undefined) {
                   wPt = `'Portugal'!${col}${oRow+1}*'Portugal'!${col}${bRow+1}*'Portugal'!${col}${aRow+1}`;
-                  wUk = `'UK'!${col}${oRow+1}*'UK'!${col}${bRow+1}*'UK'!${col}${aRow+1}`;
+                  wUk = `(('UK'!${col}${oRow+1}*'UK'!${col}${bRow+1}*'UK'!${col}${aRow+1}) * ${fxMult})`;
                 } else { wPt = "0"; wUk = "0"; }
               } else if (name === 'Avg price per booking') {
                 const oRow = metricRowMap['Number of owners in the platform'];
@@ -1182,7 +1445,14 @@ export default function App() {
               }
               rowData.push({ formula: `IF((${wPt}+${wUk})>0, (${vPt}*${wPt} + ${vUk}*${wUk})/(${wPt}+${wUk}), 0)` });
             } else {
-              rowData.push({ formula: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` });
+              const isCurr = ['FX rate (GBP / EUR)'].includes(name) ? false : true; 
+              // Wait, FX rate itself shouldn't be multiplied by FX rate! And regular metrics like # providers shouldn't either?
+              // Existing logic just summed them!
+              if (name === 'FX rate (GBP / EUR)') {
+                rowData.push({ formula: `'UK'!${col}${currentRow+1}` });
+              } else {
+                rowData.push({ formula: `'Portugal'!${col}${currentRow+1} + 'UK'!${col}${currentRow+1}` });
+              }
             }
           } else {
             const val = getStreamValue(market as Market, 'Platform Metric', name, y);
@@ -1195,7 +1465,7 @@ export default function App() {
                 const newRef = `${col}${newRow+1}`;
                 const churnRef = `${col}${churnRow+1}`;
                 const prevRef = prevCol ? `${prevCol}${currentRow+1}` : "0";
-                rowData.push({ formula: `ROUND(${prevRef} * (1 - ${churnRef}/100) + ${newRef}, 0)` });
+                rowData.push({ formula: `ROUND(${prevRef} * (1 - ${churnRef}) + ${newRef}, 0)` });
               } else { rowData.push(val); }
             } else if (name === 'Number of owners in the platform') {
               const newRow = metricRowMap['New owners added'];
@@ -1206,7 +1476,7 @@ export default function App() {
                 const newRef = `${col}${newRow+1}`;
                 const churnRef = `${col}${churnRow+1}`;
                 const prevRef = prevCol ? `${prevCol}${currentRow+1}` : "0";
-                rowData.push({ formula: `ROUND(${prevRef} * (1 - ${churnRef}/100) + ${newRef}, 0)` });
+                rowData.push({ formula: `ROUND(${prevRef} * (1 - ${churnRef}) + ${newRef}, 0)` });
               } else { rowData.push(val); }
             } else if (name.includes('%')) {
               rowData.push(val / 100);
@@ -1256,7 +1526,7 @@ export default function App() {
       const revenueRowsCount = revenueUnion.length + 3;
       const cogsRowsCount = cogsUnion.length + 3;
       const fixedRowsCount = fixedUnion.length + 3;
-      const summaryRowsCount = 10;
+      const summaryRowsCount = 15;
       
       const breakdownStartRowIdx = currentRow + revenueRowsCount + cogsRowsCount + fixedRowsCount + summaryRowsCount;
       const feePctRowIdx = breakdownStartRowIdx + 1;
@@ -1273,7 +1543,11 @@ export default function App() {
       revenueUnion.forEach(name => {
         const rowData: any[] = ['Revenue', name];
         if (market === 'Aggregated') {
-          years.forEach(y => rowData.push({ formula: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }));
+          years.forEach(y => {
+            const col = getColLetter(2 + y);
+            const getUkFxMulti = (c: string) => fxRateIdxInUnion >= 0 ? `'UK'!${c}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
+            rowData.push({ formula: `'Portugal'!${col}${currentRow + 1} + ('UK'!${col}${currentRow + 1} * ${getUkFxMulti(col)})` });
+          });
         } else if (name === 'Monthly Subscriptions') {
           years.forEach(y => rowData.push({ formula: `${getCellRef(2 + y, providersRow)}*${getCellRef(2 + y, subFeeRow)}*${getCellRef(2 + y, chargeSubRowIdx)}*12` }));
         } else if (name === 'Booking Fees') {
@@ -1305,7 +1579,11 @@ export default function App() {
       cogsUnion.forEach(name => {
         const rowData: any[] = ['COGS', name];
         if (market === 'Aggregated') {
-          years.forEach(y => rowData.push({ formula: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }));
+          years.forEach(y => {
+            const col = getColLetter(2 + y);
+            const getUkFxMulti = (c: string) => fxRateIdxInUnion >= 0 ? `'UK'!${c}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
+            rowData.push({ formula: `'Portugal'!${col}${currentRow + 1} + ('UK'!${col}${currentRow + 1} * ${getUkFxMulti(col)})` });
+          });
         } else if (name === 'Payment Processing') {
           years.forEach(y => {
             const colIdx = 2 + y;
@@ -1364,7 +1642,9 @@ export default function App() {
         const rowData: any[] = ['Fixed Cost', name];
         years.forEach(y => {
           if (market === 'Aggregated') {
-            rowData.push({ formula: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` });
+            const col = getColLetter(2 + y);
+            const getUkFxMulti = (c: string) => fxRateIdxInUnion >= 0 ? `'UK'!${c}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
+            rowData.push({ formula: `'Portugal'!${col}${currentRow + 1} + ('UK'!${col}${currentRow + 1} * ${getUkFxMulti(col)})` });
           } else {
             rowData.push(getStreamValue(market as Market, 'Fixed Cost', name, y));
           }
@@ -1390,10 +1670,15 @@ export default function App() {
       sheet.getRow(currentRow).font = { bold: true };
       
       // Gross Revenues
+      const grossRevRowIdx = currentRow;
       sheet.addRow([
         'Summary',
         'Gross Revenues',
-        ...years.map(y => ({ formula: `${getCellRef(2 + y, subVolRowIdx)}+${getCellRef(2 + y, bookVolRowIdx)}` })),
+        ...years.map(y => {
+          const bfIndex = revenueUnion.indexOf('Booking Fees');
+          const bfRef = bfIndex >= 0 ? getCellRef(2 + y, revenueStartRowIdx + bfIndex) : '0';
+          return { formula: `${getCellRef(2 + y, revenueTotalRowIdx)}-${bfRef}+${getCellRef(2 + y, bookVolRowIdx)}` };
+        }),
         { formula: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
       ]); currentRow++;
 
@@ -1461,13 +1746,81 @@ export default function App() {
         ...years.map(y => ({ formula: `IF(${getCellRef(2 + y, gmRowIdx - 2)}>0, ${getCellRef(2 + y, opRowIdx)}/${getCellRef(2 + y, gmRowIdx - 2)}, 0)` })),
         { formula: `IF(${getCellRef(7, gmRowIdx - 2)}>0, ${getCellRef(7, opRowIdx)}/${getCellRef(7, gmRowIdx - 2)}, 0)` }
       ]);
-      sheet.getRow(currentRow).getCell(3).numFmt = '0.0%';
-      sheet.getRow(currentRow).getCell(4).numFmt = '0.0%';
-      sheet.getRow(currentRow).getCell(5).numFmt = '0.0%';
-      sheet.getRow(currentRow).getCell(6).numFmt = '0.0%';
-      sheet.getRow(currentRow).getCell(7).numFmt = '0.0%';
-      sheet.getRow(currentRow).getCell(8).numFmt = '0.0%';
+      sheet.getRow(currentRow + 1).getCell(3).numFmt = '0.0%';
+      sheet.getRow(currentRow + 1).getCell(4).numFmt = '0.0%';
+      sheet.getRow(currentRow + 1).getCell(5).numFmt = '0.0%';
+      sheet.getRow(currentRow + 1).getCell(6).numFmt = '0.0%';
+      sheet.getRow(currentRow + 1).getCell(7).numFmt = '0.0%';
+      sheet.getRow(currentRow + 1).getCell(8).numFmt = '0.0%';
       currentRow++;
+
+      const accLossBegRowIdx = currentRow;
+      sheet.addRow([
+        'Summary',
+        'Accumulated Loss (Beginning)',
+        ...years.map(y => {
+          if (market === 'Aggregated') {
+            const col = getColLetter(2 + y);
+            const getUkFxMulti = (c: string) => fxRateIdxInUnion >= 0 ? `'UK'!${c}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
+            return { formula: `'Portugal'!${col}${currentRow + 1} + ('UK'!${col}${currentRow + 1} * ${getUkFxMulti(col)})` };
+          }
+          if (y === 0) return 0;
+          return { formula: getCellRef(2 + y - 1, accLossBegRowIdx + 2) };
+        }),
+        { formula: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
+      ]); currentRow++;
+
+      const taxableIncomeRowIdx = currentRow;
+      sheet.addRow([
+        'Summary',
+        'Taxable Income',
+        ...years.map(y => {
+          if (market === 'Aggregated') {
+            const col = getColLetter(2 + y);
+            const getUkFxMulti = (c: string) => fxRateIdxInUnion >= 0 ? `'UK'!${c}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
+            return { formula: `'Portugal'!${col}${currentRow + 1} + ('UK'!${col}${currentRow + 1} * ${getUkFxMulti(col)})` };
+          }
+          return { formula: `MAX(0, ${getCellRef(2 + y, opRowIdx)}+${getCellRef(2 + y, accLossBegRowIdx)})` };
+        }),
+        { formula: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
+      ]); currentRow++;
+
+      const accLossEndRowIdx = currentRow;
+      sheet.addRow([
+        'Summary',
+        'Accumulated Loss (Ending)',
+        ...years.map(y => {
+          if (market === 'Aggregated') {
+            const col = getColLetter(2 + y);
+            const getUkFxMulti = (c: string) => fxRateIdxInUnion >= 0 ? `'UK'!${c}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
+            return { formula: `'Portugal'!${col}${currentRow + 1} + ('UK'!${col}${currentRow + 1} * ${getUkFxMulti(col)})` };
+          }
+          return { formula: `MIN(0, ${getCellRef(2 + y, opRowIdx)}+${getCellRef(2 + y, accLossBegRowIdx)})` };
+        }),
+        { formula: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
+      ]); currentRow++;
+
+      sheet.addRow([
+        'Summary',
+        'Taxes',
+        ...years.map(y => {
+          if (market === 'Aggregated') {
+            const col = getColLetter(2 + y);
+            const getUkFxMulti = (c: string) => fxRateIdxInUnion >= 0 ? `'UK'!${c}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
+            return { formula: `'Portugal'!${col}${currentRow + 1} + ('UK'!${col}${currentRow + 1} * ${getUkFxMulti(col)})` };
+          }
+          return { formula: `${getCellRef(2 + y, taxableIncomeRowIdx)}*0.21` };
+        }),
+        { formula: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
+      ]); currentRow++;
+
+      const netIncomeRowIdx = currentRow;
+      sheet.addRow([
+        'Summary',
+        'Net Income',
+        ...years.map(y => ({ formula: `${getCellRef(2 + y, opRowIdx)}-${getCellRef(2 + y, currentRow - 1)}` })),
+        { formula: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
+      ]); currentRow++;
 
       sheet.addRow([]); currentRow++;
 
@@ -1497,32 +1850,298 @@ export default function App() {
       ]); currentRow++;
 
       if (market === 'Aggregated') {
-        sheet.addRow(['Breakdown', 'Subscription Volume', ...years.map(y => ({ formula: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }))]);
+        sheet.addRow(['Breakdown', 'Subscription Volume', ...years.map(y => {
+          const col = getColLetter(2 + y);
+          const getUkFxMulti = (c: string) => fxRateIdxInUnion >= 0 ? `'UK'!${c}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
+          return { formula: `'Portugal'!${col}${currentRow + 1} + ('UK'!${col}${currentRow + 1} * ${getUkFxMulti(col)})` };
+        })]);
       } else {
         sheet.addRow(['Breakdown', 'Subscription Volume', ...years.map(y => ({ formula: `${getCellRef(2 + y, providersRow)}*${getCellRef(2 + y, subFeeRow)}*${getCellRef(2 + y, chargeSubRowIdx)}*12` }))]);
       }
       currentRow++;
 
       if (market === 'Aggregated') {
-        sheet.addRow(['Breakdown', 'Booking Volume', ...years.map(y => ({ formula: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }))]);
+        sheet.addRow(['Breakdown', 'Booking Volume', ...years.map(y => {
+          const col = getColLetter(2 + y);
+          const getUkFxMulti = (c: string) => fxRateIdxInUnion >= 0 ? `'UK'!${c}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
+          return { formula: `'Portugal'!${col}${currentRow + 1} + ('UK'!${col}${currentRow + 1} * ${getUkFxMulti(col)})` };
+        })]);
       } else {
         sheet.addRow(['Breakdown', 'Booking Volume', ...years.map(y => ({ formula: `${getCellRef(2 + y, ownersRow)}*${getCellRef(2 + y, bookingsPerOwnerRow)}*${getCellRef(2 + y, avgPriceRow)}` }))]);
       }
       currentRow++;
 
       if (market === 'Aggregated') {
-        sheet.addRow(['Breakdown', 'Subscription Transactions', ...years.map(y => ({ formula: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }))]);
+        sheet.addRow(['Breakdown', 'Subscription Transactions', ...years.map(y => ({ formula: `'Portugal'!${getCellRef(2 + y, currentRow + 1)} + 'UK'!${getCellRef(2 + y, currentRow + 1)}` }))]);
       } else {
         sheet.addRow(['Breakdown', 'Subscription Transactions', ...years.map(y => ({ formula: `${getCellRef(2 + y, providersRow)}*12*${getCellRef(2 + y, chargeSubRowIdx)}` }))]);
       }
       currentRow++;
 
       if (market === 'Aggregated') {
-        sheet.addRow(['Breakdown', 'Booking Transactions', ...years.map(y => ({ formula: `'Portugal'!${getCellRef(2 + y, currentRow)} + 'UK'!${getCellRef(2 + y, currentRow)}` }))]);
+        sheet.addRow(['Breakdown', 'Booking Transactions', ...years.map(y => ({ formula: `'Portugal'!${getCellRef(2 + y, currentRow + 1)} + 'UK'!${getCellRef(2 + y, currentRow + 1)}` }))]);
       } else {
         sheet.addRow(['Breakdown', 'Booking Transactions', ...years.map(y => ({ formula: `${getCellRef(2 + y, ownersRow)}*${getCellRef(2 + y, bookingsPerOwnerRow)}` }))]);
       }
       currentRow++;
+
+      sheet.addRow([]); currentRow++;
+
+      // Cash Flow Statement
+      sheet.addRow(['Cash Flow Statement', 'Metric', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5']); currentRow++;
+      sheet.getRow(currentRow).font = { bold: true };
+      
+      const cfOpRowIdx = currentRow;
+      const defRevRowIdx = cfOpRowIdx + 25;
+      const accFeeRowIdx = cfOpRowIdx + 26;
+      
+      sheet.addRow([
+        'Cash Flow',
+        'Net Income',
+        ...years.map(y => ({ formula: getCellRef(2 + y, netIncomeRowIdx) }))
+      ]); currentRow++;
+
+      sheet.addRow([
+        'Cash Flow',
+        'Depreciation & Amortization',
+        ...years.map(y => 0)
+      ]); currentRow++;
+
+      sheet.addRow([
+        'Cash Flow',
+        '(+) Increase in Deferred Revenue',
+        ...years.map(y => {
+          if (y === 0) return { formula: getCellRef(2 + y, defRevRowIdx) };
+          return { formula: `${getCellRef(2 + y, defRevRowIdx)}-${getCellRef(2 + y - 1, defRevRowIdx)}` };
+        })
+      ]); currentRow++;
+
+      sheet.addRow([
+        'Cash Flow',
+        '(+) Increase in Accrued Provider Fees',
+        ...years.map(y => {
+          if (y === 0) return { formula: getCellRef(2 + y, accFeeRowIdx) };
+          return { formula: `${getCellRef(2 + y, accFeeRowIdx)}-${getCellRef(2 + y - 1, accFeeRowIdx)}` };
+        })
+      ]); currentRow++;
+
+      const netCfOpRowIdx = currentRow;
+      sheet.addRow([
+        'Cash Flow',
+        '= Net Cash from Operating Activities',
+        ...years.map(y => ({ formula: `SUM(${getCellRef(2 + y, cfOpRowIdx)}:${getCellRef(2 + y, currentRow - 1)})` }))
+      ]); 
+      sheet.getRow(currentRow + 1).font = { bold: true };
+      currentRow++;
+
+      sheet.addRow([
+        'Cash Flow',
+        '(-) Capital Expenditures (CapEx / IT)',
+        ...years.map(y => 0)
+      ]); currentRow++;
+
+      const netCfInvRowIdx = currentRow;
+      sheet.addRow([
+        'Cash Flow',
+        '= Net Cash from Investing Activities',
+        ...years.map(y => ({ formula: getCellRef(2 + y, currentRow - 1) }))
+      ]); 
+      sheet.getRow(currentRow + 1).font = { bold: true };
+      currentRow++;
+
+      const issuanceOfShareCapitalRowIdx = currentRow;
+      sheet.addRow([
+        'Cash Flow',
+        '(+) Issuance of Share Capital (Equity)',
+        ...years.map(y => {
+          if (market === 'Aggregated') {
+            const col = getColLetter(2 + y);
+            const getUkFxMulti = (c: string) => fxRateIdxInUnion >= 0 ? `'UK'!${c}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
+            return { formula: `'Portugal'!${col}${currentRow + 1} + ('UK'!${col}${currentRow + 1} * ${getUkFxMulti(col)})` };
+          }
+          if (market === 'Portugal' && y === 0) return 575000;
+          if (market === 'UK' && y === 2) return 950000;
+          return 0;
+        })
+      ]); currentRow++;
+
+      const netCfFinRowIdx = currentRow;
+      sheet.addRow([
+        'Cash Flow',
+        '= Net Cash from Financing Activities',
+        ...years.map(y => ({ formula: getCellRef(2 + y, currentRow - 1) }))
+      ]); 
+      sheet.getRow(currentRow + 1).font = { bold: true };
+      currentRow++;
+
+      const netIncCashRowIdx = currentRow;
+      sheet.addRow([
+        'Cash Flow',
+        'Net Increase in Cash for the Period',
+        ...years.map(y => ({ formula: `${getCellRef(2 + y, netCfOpRowIdx)}+${getCellRef(2 + y, netCfInvRowIdx)}+${getCellRef(2 + y, netCfFinRowIdx)}` }))
+      ]); 
+      sheet.getRow(currentRow + 1).font = { bold: true };
+      currentRow++;
+
+      const cashBegRowIdx = currentRow;
+      const cashEndRowIdx = currentRow + 1;
+      
+      sheet.addRow([
+        'Cash Flow',
+        'Cash Balance at Beginning of Period',
+        0,
+        { formula: getCellRef(2, cashEndRowIdx) },
+        { formula: getCellRef(3, cashEndRowIdx) },
+        { formula: getCellRef(4, cashEndRowIdx) },
+        { formula: getCellRef(5, cashEndRowIdx) }
+      ]); currentRow++;
+
+      sheet.addRow([
+        'Cash Flow',
+        'Cash Balance at End of Period',
+        ...years.map(y => ({ formula: `${getCellRef(2 + y, cashBegRowIdx)}+${getCellRef(2 + y, netIncCashRowIdx)}` }))
+      ]); 
+      sheet.getRow(currentRow + 1).font = { bold: true };
+      currentRow++;
+
+      sheet.addRow([]); currentRow++;
+
+      // Balance Sheet
+      sheet.addRow(['Balance Sheet', 'Metric', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5']); currentRow++;
+      sheet.getRow(currentRow).font = { bold: true };
+      
+      sheet.addRow(['Balance Sheet', 'ASSETS']); 
+      sheet.getRow(currentRow + 1).font = { bold: true };
+      currentRow++;
+      
+      sheet.addRow(['Balance Sheet', 'Current Assets']); currentRow++;
+      
+      sheet.addRow([
+        'Balance Sheet',
+        'Cash & Cash Equivalents',
+        ...years.map(y => ({ formula: getCellRef(2 + y, cashEndRowIdx) }))
+      ]); currentRow++;
+
+      sheet.addRow([
+        'Balance Sheet',
+        'Accounts Receivable',
+        ...years.map(y => 0)
+      ]); currentRow++;
+
+      sheet.addRow(['Balance Sheet', 'Non-Current Assets']); currentRow++;
+      
+      sheet.addRow([
+        'Balance Sheet',
+        'Intangible Assets (Software)',
+        ...years.map(y => 0)
+      ]); currentRow++;
+
+      sheet.addRow([
+        'Balance Sheet',
+        'Property, Plant & Equipment',
+        ...years.map(y => 0)
+      ]); currentRow++;
+
+      sheet.addRow([
+        'Balance Sheet',
+        'TOTAL ASSETS',
+        ...years.map(y => ({ formula: `SUM(${getCellRef(2 + y, currentRow - 5)}:${getCellRef(2 + y, currentRow - 1)})` }))
+      ]); 
+      sheet.getRow(currentRow + 1).font = { bold: true };
+      currentRow++;
+
+      sheet.addRow([]); currentRow++;
+
+      sheet.addRow(['Balance Sheet', 'LIABILITIES']); 
+      sheet.getRow(currentRow + 1).font = { bold: true };
+      currentRow++;
+
+      sheet.addRow(['Balance Sheet', 'Current Liabilities']); currentRow++;
+
+      sheet.addRow([
+        'Balance Sheet',
+        'Deferred Revenue',
+        ...years.map(y => {
+          const col = getColLetter(2 + y);
+          return { formula: `IF(${col}${grossRevRowIdx + 1}=0,0,${col}${grossRevRowIdx + 1}*0.01)` };
+        })
+      ]); currentRow++;
+
+      sheet.addRow([
+        'Balance Sheet',
+        'Accrued Provider Fees',
+        ...years.map(y => {
+          const col = getColLetter(2 + y);
+          return { formula: `IF(${col}${grossRevRowIdx + 1}=0,0,${col}${grossRevRowIdx + 1}*0.03)` };
+        })
+      ]); currentRow++;
+
+      sheet.addRow([
+        'Balance Sheet',
+        'Long-Term Debt',
+        ...years.map(y => 0)
+      ]); currentRow++;
+
+      sheet.addRow([
+        'Balance Sheet',
+        'TOTAL LIABILITIES',
+        ...years.map(y => ({ formula: `SUM(${getCellRef(2 + y, currentRow - 4)}:${getCellRef(2 + y, currentRow - 1)})` }))
+      ]); 
+      const totalLiabRowIdx = currentRow;
+      sheet.getRow(currentRow + 1).font = { bold: true };
+      currentRow++;
+
+      sheet.addRow([]); currentRow++;
+      
+      sheet.addRow(['Balance Sheet', 'EQUITY']); 
+      sheet.getRow(currentRow + 1).font = { bold: true };
+      currentRow++;
+      
+      sheet.addRow([
+        'Balance Sheet',
+        'Share Capital',
+        ...years.map(y => {
+          if (y === 0) {
+            return { formula: getCellRef(2 + y, issuanceOfShareCapitalRowIdx) };
+          }
+          return { formula: `${getCellRef(2 + y - 1, currentRow)}+${getCellRef(2 + y, issuanceOfShareCapitalRowIdx)}` };
+        })
+      ]); currentRow++;
+
+      sheet.addRow([
+        'Balance Sheet',
+        'Retained Earnings',
+        ...years.map(y => {
+          if (y === 0) return 0;
+          return { formula: `${getCellRef(2 + y - 1, currentRow)}+${getCellRef(2 + y - 1, netIncomeRowIdx)}` };
+        })
+      ]); currentRow++;
+
+      sheet.addRow([
+        'Balance Sheet',
+        'Net Income',
+        ...years.map(y => ({ formula: getCellRef(2 + y, netIncomeRowIdx) }))
+      ]); currentRow++;
+
+      sheet.addRow([
+        'Balance Sheet',
+        'TOTAL EQUITY',
+        ...years.map(y => ({ formula: `SUM(${getCellRef(2 + y, currentRow - 3)}:${getCellRef(2 + y, currentRow - 1)})` }))
+      ]); 
+      const totalEquRowIdx = currentRow;
+      sheet.getRow(currentRow + 1).font = { bold: true };
+      currentRow++;
+
+      sheet.addRow([
+        'Balance Sheet',
+        'TOTAL LIABILITIES & EQUITY',
+        ...years.map(y => ({ formula: `${getCellRef(2 + y, totalLiabRowIdx)}+${getCellRef(2 + y, totalEquRowIdx)}` }))
+      ]);
+      sheet.getRow(currentRow + 1).font = { bold: true };
+      currentRow++;
+
+      sheet.addRow([]); currentRow++;
+
 
       // Column widths
       sheet.getColumn(1).width = 25;
@@ -1749,17 +2368,17 @@ export default function App() {
         {/* Header Row for Years */}
         <div className="flex flex-col sm:flex-row sm:items-center space-y-3 sm:space-y-0 sm:space-x-3 p-3 border border-transparent">
           <div className="flex-1"></div>
-          <div className={`grid ${showTotal ? 'grid-cols-6' : 'grid-cols-5'} gap-2 w-full sm:max-w-[550px]`}>
+          <div className={`grid ${showTotal ? 'grid-cols-6' : 'grid-cols-5'} gap-2 w-full lg:max-w-[700px]`}>
             {years.map(y => (
               <div key={y} className="text-center text-xs font-medium text-slate-500">Y{y+1}</div>
             ))}
-            {showTotal && <div className="text-right text-xs font-medium text-slate-500">Total</div>}
+            {showTotal && <div className="text-right px-2 text-xs font-medium text-slate-500">Total</div>}
           </div>
         </div>
 
         {streams.map((stream) => (
           <div key={`${title}-${stream.id}`} className="flex flex-col sm:flex-row sm:items-center space-y-3 sm:space-y-0 sm:space-x-3 p-3 bg-slate-50/50 rounded-xl border border-slate-100">
-            <div className="flex-1 flex items-center space-x-2">
+            <div className="flex-1 min-w-0 flex items-center space-x-2">
               {stream.isPermanent || isReadOnly ? (
                 <div className="block w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 truncate group relative">
                   {stream.name}
@@ -1776,7 +2395,7 @@ export default function App() {
                   type="text"
                   value={stream.name}
                   onChange={(e) => updateStreamName(streams, stream.id, e.target.value, stateKey)}
-                  className="block w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-colors"
+                  className="block w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-colors min-w-0"
                   placeholder={`${prefix} Type`}
                 />
               )}
@@ -1791,7 +2410,7 @@ export default function App() {
               )}
             </div>
             
-            <div className={`grid ${showTotal ? 'grid-cols-6' : 'grid-cols-5'} gap-2 w-full sm:max-w-[550px]`}>
+            <div className={`grid ${showTotal ? 'grid-cols-6' : 'grid-cols-5'} gap-2 w-full lg:max-w-[700px]`}>
               {years.map(y => {
                 const error = getValidationError(stream.name, stream.amounts[y]);
                 const hasError = !!error;
@@ -1839,7 +2458,7 @@ export default function App() {
       {showTotal && (
         <div className="mt-4 pt-4 p-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center space-y-3 sm:space-y-0 sm:space-x-3">
           <div className="flex-1 text-sm font-medium text-slate-500">Total {title}</div>
-          <div className="grid grid-cols-6 gap-2 w-full sm:max-w-[550px]">
+          <div className="grid grid-cols-6 gap-2 w-full lg:max-w-[700px]">
             {years.map(y => (
               <div key={y} className={`text-center text-xs font-semibold whitespace-nowrap ${totalsByYear[y] >= 0 ? 'text-slate-700' : 'text-red-600'}`}>
                 {formatValue(totalsByYear[y])}
@@ -1857,7 +2476,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans text-slate-900">
-      <div className="max-w-7xl mx-auto space-y-8">
+      <div className="max-w-[1410px] mx-auto space-y-8">
         {/* Header */}
         <header className="flex flex-col sm:flex-row sm:items-center justify-between space-y-4 sm:space-y-0">
           <div className="flex items-center space-x-4">
@@ -1953,12 +2572,22 @@ export default function App() {
           >
             Balance Sheet
           </button>
+          <button
+            onClick={() => setActiveTab('sensitivity')}
+            className={`pb-4 px-2 text-sm font-medium transition-colors border-b-2 ${
+              activeTab === 'sensitivity'
+                ? 'border-indigo-600 text-indigo-600'
+                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+            }`}
+          >
+            Sensitivity Analysis
+          </button>
         </div>
 
         <div className={activeTab === 'financials' ? 'block' : 'opacity-0 pointer-events-none absolute -z-10 w-full'}>
-          <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
+          <div className="space-y-8">
             {/* Inputs Section */}
-            <div className="xl:col-span-7 space-y-6">
+            <div className="space-y-6">
               {/* Summary Table */}
               <div ref={financialSummaryRef} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative group">
                 <div className="flex justify-between items-start mb-4">
@@ -2012,6 +2641,22 @@ export default function App() {
                         ))}
                         <td className={`text-right py-2 px-2 font-bold bg-slate-50/50 font-mono whitespace-nowrap ${totalRevenue >= 0 ? 'text-slate-900' : 'text-red-900'}`}>{formatCurrency(totalRevenue)}</td>
                       </tr>
+                      {derivedRevenueStreams.map(stream => {
+                        const totalStream = years.reduce((sum, y) => sum + (Number(stream.amounts[y]) || 0), 0);
+                        return (
+                          <tr key={stream.id} className="border-b border-slate-50/50 bg-slate-50/10">
+                            <td className="py-1.5 px-2 text-xs text-slate-500 pl-6 border-l-[3px] border-l-slate-200">└ {stream.name}</td>
+                            {years.map(y => (
+                              <td key={y} className={`text-right py-1.5 px-2 font-mono whitespace-nowrap text-xs ${Number(stream.amounts[y]) >= 0 ? 'text-slate-500' : 'text-red-500'}`}>
+                                {formatCurrency(Number(stream.amounts[y]) || 0)}
+                              </td>
+                            ))}
+                            <td className={`text-right py-1.5 px-2 font-mono whitespace-nowrap text-xs bg-slate-50/30 ${totalStream >= 0 ? 'text-slate-600' : 'text-red-600'}`}>
+                              {formatCurrency(totalStream)}
+                            </td>
+                          </tr>
+                        );
+                      })}
                       <tr className="border-b border-slate-50">
                         <td className="py-2 px-2 font-medium text-slate-700">COGS</td>
                         {years.map(y => (
@@ -2044,8 +2689,26 @@ export default function App() {
                         ))}
                         <td className={`text-right py-2 px-2 font-bold bg-slate-50/50 font-mono whitespace-nowrap ${fixedCosts >= 0 ? 'text-slate-900' : 'text-red-900'}`}>{formatCurrency(fixedCosts)}</td>
                       </tr>
-                      <tr className="bg-indigo-50/30">
-                        <td className="py-2 px-2 font-semibold text-indigo-700">Operating Profit</td>
+                      <tr className="border-b border-slate-50 bg-slate-50/20">
+                        <td className="py-2 px-2 font-semibold text-slate-700">EBITDA</td>
+                        {years.map(y => (
+                          <td key={y} className={`text-right py-2 px-2 font-bold font-mono whitespace-nowrap ${opProfitByYear[y] >= 0 ? 'text-slate-600' : 'text-red-600'}`}>
+                            {formatCurrency(opProfitByYear[y])}
+                          </td>
+                        ))}
+                        <td className={`text-right py-2 px-2 font-bold bg-slate-50/50 font-mono whitespace-nowrap ${operatingProfit >= 0 ? 'text-slate-800' : 'text-red-800'}`}>
+                          {formatCurrency(operatingProfit)}
+                        </td>
+                      </tr>
+                      <tr className="border-b border-slate-50">
+                        <td className="py-2 px-2 font-medium text-slate-500 italic pl-4">(-) Depreciation & Amortization</td>
+                        {years.map(y => (
+                          <td key={y} className="text-right py-2 px-2 font-mono text-slate-400 whitespace-nowrap">{getCurrencySymbol()}0</td>
+                        ))}
+                        <td className="text-right py-2 px-2 font-bold bg-slate-50/50 font-mono text-slate-500 whitespace-nowrap">{getCurrencySymbol()}0</td>
+                      </tr>
+                      <tr className="bg-indigo-50/30 border-b border-indigo-100">
+                        <td className="py-2 px-2 font-semibold text-indigo-700">Operating Profit (EBIT)</td>
                         {years.map(y => (
                           <td key={y} className={`text-right py-2 px-2 font-bold font-mono whitespace-nowrap ${opProfitByYear[y] >= 0 ? 'text-indigo-600' : 'text-red-600'}`}>
                             {formatCurrency(opProfitByYear[y])}
@@ -2066,6 +2729,28 @@ export default function App() {
                           {calculatedOpProfitPercent.toFixed(1)}%
                         </td>
                       </tr>
+                      <tr className="border-b border-slate-50">
+                        <td className="py-2 px-2 font-medium text-slate-500 italic pl-4">(-) Taxes (21%)</td>
+                        {years.map(y => (
+                          <td key={y} className="text-right py-2 px-2 font-mono text-slate-500 whitespace-nowrap">
+                            {formatCurrency(taxByYear[y])}
+                          </td>
+                        ))}
+                        <td className="text-right py-2 px-2 font-bold bg-slate-50/50 font-mono text-slate-600 whitespace-nowrap">
+                          {formatCurrency(totalTaxes)}
+                        </td>
+                      </tr>
+                      <tr className="bg-emerald-50/30">
+                        <td className="py-3 px-2 font-bold text-emerald-800">Net Income</td>
+                        {years.map(y => (
+                          <td key={y} className={`text-right py-3 px-2 font-bold font-mono whitespace-nowrap ${netIncomeByYear[y] >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                            {formatCurrency(netIncomeByYear[y])}
+                          </td>
+                        ))}
+                        <td className={`text-right py-3 px-2 font-bold bg-emerald-50/50 font-mono whitespace-nowrap ${totalNetIncome >= 0 ? 'text-emerald-900' : 'text-red-900'}`}>
+                          {formatCurrency(totalNetIncome)}
+                        </td>
+                      </tr>
                     </tbody>
                   </table>
                 </div>
@@ -2073,11 +2758,11 @@ export default function App() {
 
               {renderStreamSection('Revenue Streams', derivedRevenueStreams, 'Revenue', totalRevenue, totalRevenueByYear, 'revenueStreams', 'currency', true, revenueStreamsRef, 'revenue-streams')}
               {renderStreamSection('COGS', derivedVariableCostsStreams, 'Cost', totalVariableCosts, totalVarCostsByYear, 'variableCostsStreams', 'currency', true, cogsRef, 'cogs-streams')}
-              {renderStreamSection('Fixed Operating Costs', fixedCostsStreams, 'Fixed Cost', fixedCosts, totalFixedCostsByYear, 'fixedCostsStreams', 'currency', true, fixedCostsRef, 'fixed-costs-streams')}
+              {renderStreamSection('Fixed Operating Costs', derivedFixedCostsStreams, 'Fixed Cost', fixedCosts, totalFixedCostsByYear, 'fixedCostsStreams', 'currency', true, fixedCostsRef, 'fixed-costs-streams')}
             </div>
 
             {/* Outputs & Visualization Section */}
-            <div className="xl:col-span-5 space-y-6">
+            <div className="space-y-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 {/* Gross Margin Card */}
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
@@ -2177,7 +2862,7 @@ export default function App() {
                       axisLine={false} 
                       tickLine={false} 
                       tick={{ fill: '#64748b', fontSize: 12 }}
-                      tickFormatter={(value) => `€${value >= 1000 ? (value / 1000).toFixed(0) + 'k' : value}`}
+                      tickFormatter={(value) => `${getCurrencySymbol()}${value >= 1000 ? (value / 1000).toFixed(0) + 'k' : value}`}
                     />
                     <Tooltip 
                       formatter={formatTooltip}
@@ -2272,7 +2957,7 @@ export default function App() {
                       axisLine={false} 
                       tickLine={false} 
                       tick={{ fill: '#64748b', fontSize: 12 }}
-                      tickFormatter={(value) => `€${value >= 1000000 ? (value / 1000000).toFixed(1) + 'M' : value >= 1000 ? (value / 1000).toFixed(0) + 'k' : value}`}
+                      tickFormatter={(value) => `${getCurrencySymbol()}${value >= 1000000 ? (value / 1000000).toFixed(1) + 'M' : value >= 1000 ? (value / 1000).toFixed(0) + 'k' : value}`}
                     />
                     <Tooltip 
                       formatter={(value: any, name: any) => [formatCurrency(Number(value) || 0), name]}
@@ -2346,9 +3031,8 @@ export default function App() {
 
         <div className={activeTab === 'platform' ? 'block' : 'opacity-0 pointer-events-none absolute -z-10 w-full'}>
           <div className="space-y-8">
-            <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
-              <div className="xl:col-span-7 space-y-6">
-                {renderStreamSection('Platform Metrics', platformMetricsStreams, 'Metric', totalPlatformMetrics, totalPlatformMetricsByYear, 'platformMetricsStreams', 'number', false, platformMetricsRef, 'platform-metrics')}
+            <div className="space-y-6">
+              {renderStreamSection('Platform Metrics', platformMetricsStreams, 'Metric', totalPlatformMetrics, totalPlatformMetricsByYear, 'platformMetricsStreams', 'number', false, platformMetricsRef, 'platform-metrics')}
                 
                 <div ref={platformSettingsRef} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6 relative group">
                   <div className="flex justify-between items-start">
@@ -2429,9 +3113,8 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="xl:col-span-5 space-y-6">
+              <div className="space-y-6">
                 {/* Provider Analysis Chart */}
                 <div ref={providerAnalysisRef} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 relative group">
                   <div className="flex justify-between items-start mb-6">
@@ -2514,6 +3197,48 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* Bookings Analysis Chart */}
+                <div ref={bookingsChartRef} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 relative group">
+                  <div className="flex justify-between items-start mb-6">
+                    <div className="flex items-center space-x-3">
+                      <h2 className="text-lg font-medium">Bookings Analysis</h2>
+                      <MarketFlags market={activeMarket} />
+                    </div>
+                    <div data-export-exclude="true" className="flex space-x-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                      <button 
+                        onClick={() => copyChart(bookingsChartRef, 'bookings-analysis')}
+                        className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                        title="Copy to Clipboard"
+                      >
+                        {copiedChart === 'bookings-analysis' ? <Check className="w-5 h-5 text-green-500" /> : <Copy className="w-5 h-5" />}
+                      </button>
+                      <button 
+                        onClick={() => downloadChart(bookingsChartRef, 'bookings-analysis')}
+                        className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                        title="Download as PNG"
+                      >
+                        <Camera className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="h-80 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={platformChartData}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(val) => `${(val / 1000).toFixed(0)}k`} />
+                        <Tooltip 
+                          contentStyle={{ borderRadius: '0.75rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                        />
+                        <Legend verticalAlign="top" height={36}/>
+                        <Line type="monotone" dataKey="Number of Bookings" name="Total Bookings" stroke="#8b5cf6" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }}>
+                          <LabelList dataKey="Number of Bookings" position="top" formatter={(val: number) => `${(val / 1000).toFixed(1)}k`} />
+                        </Line>
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
                 {/* Independent Churn Trend Charts */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div ref={providerChurnRef} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 relative group">
@@ -2544,7 +3269,7 @@ export default function App() {
                     </div>
                     <div className="h-32 w-full">
                       <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={platformChartData}>
+                        <LineChart data={platformChartData} margin={{ top: 20, right: 10, left: 0, bottom: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                           <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10 }} />
                           <YAxis domain={['auto', 'auto']} axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10 }} tickFormatter={(val) => `${val}%`} />
@@ -2552,7 +3277,7 @@ export default function App() {
                             formatter={(val: any) => [`${val}%`, 'Churn']}
                             contentStyle={{ borderRadius: '0.5rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
                           />
-                          <Line type="monotone" dataKey="Provider Churn" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                          <Line type="monotone" dataKey="Provider Churn" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} label={{ position: 'top', fill: '#f59e0b', fontSize: 10, fontWeight: 500, formatter: (val: any) => `${val}%` }} />
                         </LineChart>
                       </ResponsiveContainer>
                     </div>
@@ -2586,7 +3311,7 @@ export default function App() {
                     </div>
                     <div className="h-32 w-full">
                       <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={platformChartData}>
+                        <LineChart data={platformChartData} margin={{ top: 20, right: 10, left: 0, bottom: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                           <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10 }} />
                           <YAxis domain={['auto', 'auto']} axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10 }} tickFormatter={(val) => `${val}%`} />
@@ -2594,7 +3319,7 @@ export default function App() {
                             formatter={(val: any) => [`${val}%`, 'Churn']}
                             contentStyle={{ borderRadius: '0.5rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
                           />
-                          <Line type="monotone" dataKey="Owner Churn" stroke="#6366f1" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                          <Line type="monotone" dataKey="Owner Churn" stroke="#6366f1" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} label={{ position: 'top', fill: '#6366f1', fontSize: 10, fontWeight: 500, formatter: (val: any) => `${val}%` }} />
                         </LineChart>
                       </ResponsiveContainer>
                     </div>
@@ -2647,7 +3372,7 @@ export default function App() {
                   </thead>
                   <tbody>
                     <tr className="border-b border-slate-50 hover:bg-slate-50/30 transition-colors">
-                      <td className="py-4 px-4 text-sm font-medium text-slate-700">Gross Margin (€)</td>
+                      <td className="py-4 px-4 text-sm font-medium text-slate-700">Gross Margin ({getCurrencySymbol()})</td>
                       {years.map(y => (
                         <td key={y} className="text-right py-4 px-4 text-sm text-slate-600 font-mono">
                           {formatCurrency(grossMarginByYear[y])}
@@ -2727,7 +3452,7 @@ export default function App() {
           </div>
         </div>
         <div className={activeTab === 'cash-flow' ? 'block' : 'opacity-0 pointer-events-none absolute -z-10 w-full'}>
-          <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative group">
+          <div ref={cashFlowRef} className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative group">
             <div className="flex justify-between items-start mb-6">
               <div className="flex items-center space-x-3">
                 <h2 className="text-xl font-semibold flex items-center space-x-2">
@@ -2735,6 +3460,22 @@ export default function App() {
                   <span>Cash Flow Statement</span>
                 </h2>
                 <MarketFlags market={activeMarket} />
+              </div>
+              <div data-export-exclude="true" className="flex space-x-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                <button 
+                  onClick={() => copyChart(cashFlowRef, 'cash-flow-statement')}
+                  className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                  title="Copy to Clipboard"
+                >
+                  {copiedChart === 'cash-flow-statement' ? <Check className="w-5 h-5 text-green-500" /> : <Copy className="w-5 h-5" />}
+                </button>
+                <button 
+                  onClick={() => downloadChart(cashFlowRef, 'cash-flow-statement')}
+                  className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                  title="Download as PNG"
+                >
+                  <Camera className="w-5 h-5" />
+                </button>
               </div>
             </div>
             
@@ -2761,7 +3502,7 @@ export default function App() {
                   <tr className="border-b border-slate-50">
                     <td className="py-2 px-2 font-medium text-slate-700 pl-4">Depreciation & Amortization</td>
                     {years.map(y => (
-                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-600">€0</td>
+                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-600">{getCurrencySymbol()}0</td>
                     ))}
                   </tr>
                   <tr className="border-b border-slate-50">
@@ -2795,13 +3536,13 @@ export default function App() {
                   <tr className="border-b border-slate-50">
                     <td className="py-2 px-2 font-medium text-slate-700 pl-4">(-) Capital Expenditures (CapEx / IT)</td>
                     {years.map(y => (
-                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-600">€0</td>
+                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-600">{getCurrencySymbol()}0</td>
                     ))}
                   </tr>
                   <tr className="border-b border-slate-50 bg-indigo-50/20">
                     <td className="py-2 px-2 font-semibold text-indigo-800 pl-4">= Net Cash from Investing Activities</td>
                     {years.map(y => (
-                      <td key={y} className="text-right py-2 px-2 font-bold font-mono whitespace-nowrap text-slate-600">€0</td>
+                      <td key={y} className="text-right py-2 px-2 font-bold font-mono whitespace-nowrap text-slate-600">{getCurrencySymbol()}0</td>
                     ))}
                   </tr>
 
@@ -2846,7 +3587,7 @@ export default function App() {
         </div>
 
         <div className={activeTab === 'balance-sheet' ? 'block' : 'opacity-0 pointer-events-none absolute -z-10 w-full'}>
-          <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative group">
+          <div ref={balanceSheetRef} className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative group">
             <div className="flex justify-between items-start mb-6">
               <div className="flex items-center space-x-3">
                 <h2 className="text-xl font-semibold flex items-center space-x-2">
@@ -2854,6 +3595,22 @@ export default function App() {
                   <span>Balance Sheet</span>
                 </h2>
                 <MarketFlags market={activeMarket} />
+              </div>
+              <div data-export-exclude="true" className="flex space-x-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                <button 
+                  onClick={() => copyChart(balanceSheetRef, 'balance-sheet')}
+                  className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                  title="Copy to Clipboard"
+                >
+                  {copiedChart === 'balance-sheet' ? <Check className="w-5 h-5 text-green-500" /> : <Copy className="w-5 h-5" />}
+                </button>
+                <button 
+                  onClick={() => downloadChart(balanceSheetRef, 'balance-sheet')}
+                  className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                  title="Download as PNG"
+                >
+                  <Camera className="w-5 h-5" />
+                </button>
               </div>
             </div>
             
@@ -2883,7 +3640,7 @@ export default function App() {
                   <tr className="border-b border-slate-50">
                     <td className="py-2 px-2 font-medium text-slate-600 pl-8">Accounts Receivable</td>
                     {years.map(y => (
-                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-600">€0</td>
+                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-600">{getCurrencySymbol()}0</td>
                     ))}
                   </tr>
                   <tr className="border-b border-slate-50 bg-slate-50/50">
@@ -2892,13 +3649,13 @@ export default function App() {
                   <tr className="border-b border-slate-50">
                     <td className="py-2 px-2 font-medium text-slate-600 pl-8">Intangible Assets (Software)</td>
                     {years.map(y => (
-                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-600">€0</td>
+                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-600">{getCurrencySymbol()}0</td>
                     ))}
                   </tr>
                   <tr className="border-b border-slate-50">
                     <td className="py-2 px-2 font-medium text-slate-600 pl-8">Property, Plant & Equipment (PPE)</td>
                     {years.map(y => (
-                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-600">€0</td>
+                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-600">{getCurrencySymbol()}0</td>
                     ))}
                   </tr>
                   <tr className="border-b-2 border-indigo-200 bg-indigo-50/50">
@@ -2932,7 +3689,7 @@ export default function App() {
                   <tr className="border-b border-slate-50">
                     <td className="py-2 px-2 font-medium text-slate-600 pl-8">Long-Term Debt</td>
                     {years.map(y => (
-                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-600">€0</td>
+                      <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-600">{getCurrencySymbol()}0</td>
                     ))}
                   </tr>
                   <tr className="border-b-2 border-indigo-200 bg-indigo-50/20">
@@ -2975,6 +3732,178 @@ export default function App() {
                     {years.map(y => (
                       <td key={y} className="text-right py-4 px-4 font-bold font-mono whitespace-nowrap">{formatCurrency(totalLiabilities[y] + totalEquity[y])}</td>
                     ))}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div className={activeTab === 'sensitivity' ? 'block' : 'opacity-0 pointer-events-none absolute -z-10 w-full'}>
+          <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative group">
+            <div className="flex justify-between items-start mb-6">
+              <div className="flex items-center space-x-3">
+                <h2 className="text-xl font-semibold flex items-center space-x-2">
+                  <Calculator className="w-6 h-6 text-indigo-600" />
+                  <span>Sensitivity Analysis</span>
+                </h2>
+                <MarketFlags market={activeMarket} />
+              </div>
+              <div className="flex space-x-6 text-sm">
+                <div className="flex flex-col items-end bg-slate-50 px-4 py-2 rounded-lg border border-slate-100">
+                  <span className="text-slate-500 font-medium text-xs uppercase tracking-wide">PT Total Bookings (5Y)</span>
+                  <span className="font-mono font-bold text-slate-800 text-base">{new Intl.NumberFormat('en-US').format(Math.round(sensitivityData.ptBookings))}</span>
+                </div>
+                <div className="flex flex-col items-end bg-slate-50 px-4 py-2 rounded-lg border border-slate-100">
+                  <span className="text-slate-500 font-medium text-xs uppercase tracking-wide">UK Total Bookings (5Y)</span>
+                  <span className="font-mono font-bold text-slate-800 text-base">{new Intl.NumberFormat('en-US').format(Math.round(sensitivityData.ukBookings))}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-10">
+              {/* Sliders */}
+              <div className="space-y-4">
+                <label className="text-sm font-medium text-slate-700 flex justify-between">
+                  <span>Revenue Adjustment</span>
+                  <span className={sensitivityMods.revenue > 0 ? 'text-green-600 font-bold' : sensitivityMods.revenue < 0 ? 'text-red-600 font-bold' : 'text-slate-500 font-bold'}>
+                    {sensitivityMods.revenue > 0 ? '+' : ''}{sensitivityMods.revenue}%
+                  </span>
+                </label>
+                <input 
+                  type="range" 
+                  min="-50" 
+                  max="50" 
+                  value={sensitivityMods.revenue} 
+                  onChange={e => setSensitivityMods({...sensitivityMods, revenue: Number(e.target.value)})}
+                  className="w-full accent-indigo-600"
+                />
+                <p className="text-xs text-slate-500">Applies a percentage change to total gross revenues across all years.</p>
+              </div>
+              <div className="space-y-4">
+                <label className="text-sm font-medium text-slate-700 flex justify-between">
+                  <span>COGS Adjustment</span>
+                  <span className={sensitivityMods.cogs > 0 ? 'text-red-600 font-bold' : sensitivityMods.cogs < 0 ? 'text-green-600 font-bold' : 'text-slate-500 font-bold'}>
+                    {sensitivityMods.cogs > 0 ? '+' : ''}{sensitivityMods.cogs}%
+                  </span>
+                </label>
+                <input 
+                  type="range" 
+                  min="-50" 
+                  max="50" 
+                  value={sensitivityMods.cogs} 
+                  onChange={e => setSensitivityMods({...sensitivityMods, cogs: Number(e.target.value)})}
+                  className="w-full accent-indigo-600"
+                />
+                <p className="text-xs text-slate-500">Applies a percentage change to variable costs across all years.</p>
+              </div>
+              <div className="space-y-4">
+                <label className="text-sm font-medium text-slate-700 flex justify-between">
+                  <span>Fixed Costs Adjustment</span>
+                  <span className={sensitivityMods.fixedCosts > 0 ? 'text-red-600 font-bold' : sensitivityMods.fixedCosts < 0 ? 'text-green-600 font-bold' : 'text-slate-500 font-bold'}>
+                    {sensitivityMods.fixedCosts > 0 ? '+' : ''}{sensitivityMods.fixedCosts}%
+                  </span>
+                </label>
+                <input 
+                  type="range" 
+                  min="-50" 
+                  max="50" 
+                  value={sensitivityMods.fixedCosts} 
+                  onChange={e => setSensitivityMods({...sensitivityMods, fixedCosts: Number(e.target.value)})}
+                  className="w-full accent-indigo-600"
+                />
+                <p className="text-xs text-slate-500">Applies a percentage change to fixed costs across all years.</p>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left">
+                <thead className="bg-slate-50 border-y border-slate-200">
+                  <tr>
+                    <th className="py-3 px-4 font-semibold text-slate-900 rounded-tl-lg">Modified P&L</th>
+                    {years.map(y => (
+                      <th key={y} className="text-right py-3 px-4 font-semibold text-slate-900">Year {y + 1}</th>
+                    ))}
+                    <th className="text-right py-3 px-4 font-semibold text-slate-900 bg-slate-100 rounded-tr-lg">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  <tr className="hover:bg-slate-50/50">
+                    <td className="py-3 px-4 font-medium text-slate-800">Gross Revenue</td>
+                    {years.map(y => (
+                      <td key={y} className="text-right py-3 px-4 font-mono whitespace-nowrap text-slate-700">
+                        {formatCurrency(sensitivityData.data.grossRev[y])}
+                      </td>
+                    ))}
+                    <td className="text-right py-3 px-4 font-mono whitespace-nowrap font-bold text-slate-800 bg-slate-50/50">
+                      {formatCurrency(sensitivityData.totals.grossRev)}
+                    </td>
+                  </tr>
+                  <tr className="hover:bg-slate-50/50">
+                    <td className="py-3 px-4 font-medium text-slate-800">Net Revenue</td>
+                    {years.map(y => (
+                      <td key={y} className="text-right py-3 px-4 font-mono whitespace-nowrap text-slate-700">
+                        {formatCurrency(sensitivityData.data.netRev[y])}
+                      </td>
+                    ))}
+                    <td className="text-right py-3 px-4 font-mono whitespace-nowrap font-bold text-slate-800 bg-slate-50/50">
+                      {formatCurrency(sensitivityData.totals.netRev)}
+                    </td>
+                  </tr>
+                  <tr className="hover:bg-slate-50/50">
+                    <td className="py-3 px-4 font-medium text-slate-800">COGS</td>
+                    {years.map(y => (
+                      <td key={y} className="text-right py-3 px-4 font-mono whitespace-nowrap text-red-600">
+                        -{formatCurrency(sensitivityData.data.cogs[y])}
+                      </td>
+                    ))}
+                    <td className="text-right py-3 px-4 font-mono whitespace-nowrap font-bold text-red-700 bg-slate-50/50">
+                      -{formatCurrency(sensitivityData.totals.cogs)}
+                    </td>
+                  </tr>
+                  <tr className="bg-slate-50/80 font-bold border-y border-slate-200">
+                    <td className="py-3 px-4 text-slate-900">Gross Margin</td>
+                    {years.map(y => (
+                      <td key={y} className={`text-right py-3 px-4 font-mono whitespace-nowrap ${sensitivityData.data.margin[y] >= 0 ? 'text-slate-900' : 'text-red-700'}`}>
+                        {formatCurrency(sensitivityData.data.margin[y])}
+                      </td>
+                    ))}
+                    <td className={`text-right py-3 px-4 font-mono whitespace-nowrap bg-slate-100 ${sensitivityData.totals.margin >= 0 ? 'text-slate-900' : 'text-red-700'}`}>
+                      {formatCurrency(sensitivityData.totals.margin)}
+                    </td>
+                  </tr>
+                  <tr className="hover:bg-slate-50/50">
+                    <td className="py-3 px-4 font-medium text-slate-800">Fixed Costs</td>
+                    {years.map(y => (
+                      <td key={y} className="text-right py-3 px-4 font-mono whitespace-nowrap text-red-600">
+                        -{formatCurrency(sensitivityData.data.fixedCosts[y])}
+                      </td>
+                    ))}
+                    <td className="text-right py-3 px-4 font-mono whitespace-nowrap font-bold text-red-700 bg-slate-50/50">
+                      -{formatCurrency(sensitivityData.totals.fixedCosts)}
+                    </td>
+                  </tr>
+                  <tr className="bg-indigo-50 border-y border-indigo-100 font-bold">
+                    <td className="py-4 px-4 text-indigo-900">Operating Profit</td>
+                    {years.map(y => (
+                      <td key={y} className={`text-right py-4 px-4 font-mono whitespace-nowrap ${sensitivityData.data.opProfit[y] >= 0 ? 'text-indigo-800' : 'text-red-800'}`}>
+                        {formatCurrency(sensitivityData.data.opProfit[y])}
+                      </td>
+                    ))}
+                    <td className={`text-right py-4 px-4 font-mono whitespace-nowrap bg-indigo-100/50 ${sensitivityData.totals.opProfit >= 0 ? 'text-indigo-900' : 'text-red-900'}`}>
+                      {formatCurrency(sensitivityData.totals.opProfit)}
+                    </td>
+                  </tr>
+                  <tr className="bg-emerald-50 border-b border-emerald-100 font-bold">
+                    <td className="py-4 px-4 text-emerald-900">Net Income</td>
+                    {years.map(y => (
+                      <td key={y} className={`text-right py-4 px-4 font-mono whitespace-nowrap ${sensitivityData.data.netIncome[y] >= 0 ? 'text-emerald-800' : 'text-red-800'}`}>
+                        {formatCurrency(sensitivityData.data.netIncome[y])}
+                      </td>
+                    ))}
+                    <td className={`text-right py-4 px-4 font-mono whitespace-nowrap bg-emerald-100/50 ${sensitivityData.totals.netIncome >= 0 ? 'text-emerald-900' : 'text-red-900'}`}>
+                      {formatCurrency(sensitivityData.totals.netIncome)}
+                    </td>
                   </tr>
                 </tbody>
               </table>
