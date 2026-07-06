@@ -66,7 +66,7 @@ const DEFAULT_FIXED_COSTS_STREAMS: FinancialStream[] = [
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'financials' | 'platform' | 'gross-margin' | 'cash-flow' | 'balance-sheet' | 'sensitivity'>('financials');
+  const [activeTab, setActiveTab] = useState<'financials' | 'platform' | 'gross-margin' | 'cash-flow' | 'balance-sheet' | 'sensitivity' | 'highlights'>('financials');
   const [activeMarket, setActiveMarket] = useState<Market>('Portugal');
   const [copiedChart, setCopiedChart] = useState<string | null>(null);
   
@@ -455,7 +455,7 @@ export default function App() {
             const it = Number(itStream?.amounts?.[y]) || 0;
             const salary = Number(salaryStream?.amounts?.[y]) || 0;
             const pct = (Number(crossChargeStream?.amounts?.[y]) || 0) / 100;
-            return -((it + salary) * pct);
+            return Number((-((it + salary) * pct)).toFixed(6));
         });
         derivedFixedCostsStreams.push({
             id: 'fc-cross-charge-pt',
@@ -478,7 +478,7 @@ export default function App() {
             const pct = (Number(crossChargeStream?.amounts?.[y]) || 0) / 100;
             const ptRecoveryEur = ((it + salary) * pct);
             const fx = Number(fxRateStream?.amounts?.[y]) || 1.16;
-            return ptRecoveryEur / fx;
+            return Number((ptRecoveryEur / fx).toFixed(6));
         });
         derivedFixedCostsStreams.push({
             id: 'fc-cross-charge-uk',
@@ -510,9 +510,10 @@ export default function App() {
     const TAX_RATE = 0.21;
     const equityInjection = [0, 0, 0, 0, 0];
     if (marketName === 'Portugal') {
-        equityInjection[0] = 575000;
+        equityInjection[0] = 600000;
+        equityInjection[1] = 500000;
     } else if (marketName === 'UK') {
-        equityInjection[2] = 950000;
+        equityInjection[2] = 1600000;
     }
 
     let accumulatedLoss = 0;
@@ -592,6 +593,31 @@ export default function App() {
     const totalEquity = years.map(i => shareCapital[i] + retainedEarnings[i] + netIncomeByYear[i]);
     const totalLiabilities = years.map(i => defRevBalance[i] + accruedFeesBalance[i]);
 
+    const WACC = 0.173;
+    const npv = cashFromOp.reduce((acc, cf, t) => acc + cf / Math.pow(1 + WACC, t + 1), 0);
+    
+    let irr = 0;
+    const maxTries = 1000;
+    const tolerance = 1e-5;
+    let rate = 0.1;
+    for (let i = 0; i < maxTries; i++) {
+        let npvCalc = 0;
+        let dNpv = 0;
+        for (let t = 0; t < 5; t++) {
+            npvCalc += cashFromOp[t] / Math.pow(1 + rate, t + 1);
+            dNpv -= (t + 1) * cashFromOp[t] / Math.pow(1 + rate, t + 2);
+        }
+        if (Math.abs(dNpv) < 1e-8) break;
+        const newRate = rate - npvCalc / dNpv;
+        if (Math.abs(newRate - rate) < tolerance) {
+            irr = newRate;
+            break;
+        }
+        rate = newRate;
+    }
+
+    const calculatedNetIncomePercent = totalRevenue > 0 ? (totalNetIncome / totalRevenue) * 100 : 0;
+
     return {
       platformMetricsStreams: derivedPlatformMetricsStreams,
       derivedRevenueStreams,
@@ -631,7 +657,10 @@ export default function App() {
       totalTaxes,
       totalNetIncome,
       calculatedMarginPercent,
-      calculatedOpProfitPercent
+      calculatedOpProfitPercent,
+      calculatedNetIncomePercent,
+      npv,
+      irr
     };
   };
 
@@ -687,7 +716,10 @@ export default function App() {
     totalTaxes,
     totalNetIncome,
     calculatedMarginPercent,
-    calculatedOpProfitPercent
+    calculatedOpProfitPercent,
+    calculatedNetIncomePercent,
+    npv,
+    irr
   } = React.useMemo(() => {
     if (activeMarket === 'Aggregated') {
       const pt = markets.Portugal;
@@ -940,6 +972,31 @@ export default function App() {
     const totalEquity = years.map(i => shareCapital[i] + retainedEarnings[i] + netIncomeByYear[i]);
     const totalLiabilities = years.map(i => defRevBalance[i] + accruedFeesBalance[i]);
 
+    const WACC = 0.173;
+    const npv = cashFromOp.reduce((acc, cf, t) => acc + cf / Math.pow(1 + WACC, t + 1), 0);
+    
+    let irr = 0;
+    const maxTries = 1000;
+    const tolerance = 1e-5;
+    let rate = 0.1;
+    for (let i = 0; i < maxTries; i++) {
+        let npvCalc = 0;
+        let dNpv = 0;
+        for (let t = 0; t < 5; t++) {
+            npvCalc += cashFromOp[t] / Math.pow(1 + rate, t + 1);
+            dNpv -= (t + 1) * cashFromOp[t] / Math.pow(1 + rate, t + 2);
+        }
+        if (Math.abs(dNpv) < 1e-8) break;
+        const newRate = rate - npvCalc / dNpv;
+        if (Math.abs(newRate - rate) < tolerance) {
+            irr = newRate;
+            break;
+        }
+        rate = newRate;
+    }
+
+    const calculatedNetIncomePercent = totalRevenue > 0 ? (totalNetIncome / totalRevenue) * 100 : 0;
+
       return {
         platformMetricsStreams: aggregateStreams(ptFin.platformMetricsStreams, ukFin.platformMetricsStreams, true),
         revenueStreams: aggregateStreams(ptFin.revenueStreams, ukFin.revenueStreams),
@@ -984,7 +1041,10 @@ export default function App() {
         totalTaxes,
         totalNetIncome,
         calculatedMarginPercent,
-        calculatedOpProfitPercent
+        calculatedOpProfitPercent,
+        calculatedNetIncomePercent,
+        npv,
+        irr
       };
     }
     const currentMarketData = markets[activeMarket];
@@ -1959,8 +2019,15 @@ export default function App() {
             const getUkFxMulti = (c: string) => fxRateIdxInUnion >= 0 ? `'UK'!${c}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
             return { formula: `'Portugal'!${col}${currentRow + 1} + ('UK'!${col}${currentRow + 1} * ${getUkFxMulti(col)})` };
           }
-          if (market === 'Portugal' && y === 0) return 575000;
-          if (market === 'UK' && y === 2) return 950000;
+          if (market === 'Portugal') {
+            if (y === 0) return 600000;
+            if (y === 1) return 500000;
+            return 0;
+          }
+          if (market === 'UK') {
+            if (y === 2) return 1600000;
+            return 0;
+          }
           return 0;
         })
       ]); currentRow++;
@@ -2142,6 +2209,25 @@ export default function App() {
 
       sheet.addRow([]); currentRow++;
 
+
+      // Valuation Metrics
+      sheet.addRow(['Valuation Metrics', 'Metric', 'Value']); currentRow++;
+      sheet.getRow(currentRow).font = { bold: true };
+      sheet.addRow([
+        'Valuation',
+        'NPV (WACC 17.3%)',
+        { formula: `NPV(0.173, C${netCfOpRowIdx + 1}:G${netCfOpRowIdx + 1})` }
+      ]);
+      sheet.getRow(currentRow + 1).getCell(3).numFmt = '#,##0';
+      currentRow++;
+      sheet.addRow([
+        'Valuation',
+        'Internal Rate of Return (IRR)',
+        { formula: `IRR(C${netCfOpRowIdx + 1}:G${netCfOpRowIdx + 1})` }
+      ]);
+      sheet.getRow(currentRow + 1).getCell(3).numFmt = '0.0%';
+      currentRow++;
+      sheet.addRow([]); currentRow++;
 
       // Column widths
       sheet.getColumn(1).width = 25;
@@ -2581,6 +2667,16 @@ export default function App() {
             }`}
           >
             Sensitivity Analysis
+          </button>
+          <button
+            onClick={() => setActiveTab('highlights')}
+            className={`pb-4 px-2 text-sm font-medium transition-colors border-b-2 ${
+              activeTab === 'highlights'
+                ? 'border-indigo-600 text-indigo-600'
+                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+            }`}
+          >
+            Financial Highlights
           </button>
         </div>
 
@@ -3907,6 +4003,64 @@ export default function App() {
                   </tr>
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+
+        <div className={activeTab === 'highlights' ? 'block' : 'opacity-0 pointer-events-none absolute -z-10 w-full'}>
+          <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative group">
+            <div className="flex justify-between items-start mb-6">
+              <div className="flex items-center space-x-3">
+                <h2 className="text-xl font-semibold flex items-center space-x-2">
+                  <TrendingUp className="w-6 h-6 text-indigo-600" />
+                  <span>Financial Highlights</span>
+                </h2>
+                <MarketFlags market={activeMarket} />
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-slate-50 p-6 rounded-xl border border-slate-100">
+                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">Total Operating Profit</h3>
+                <div className="flex items-baseline space-x-3">
+                  <span className={`text-3xl font-bold ${operatingProfit >= 0 ? 'text-indigo-600' : 'text-red-600'}`}>
+                    {formatCurrency(operatingProfit)}
+                  </span>
+                  <span className={`text-lg font-medium ${calculatedOpProfitPercent >= 0 ? 'text-indigo-400' : 'text-red-400'}`}>
+                    {calculatedOpProfitPercent.toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 p-6 rounded-xl border border-slate-100">
+                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">Total Net Income</h3>
+                <div className="flex items-baseline space-x-3">
+                  <span className={`text-3xl font-bold ${totalNetIncome >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {formatCurrency(totalNetIncome)}
+                  </span>
+                  <span className={`text-lg font-medium ${calculatedNetIncomePercent >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {calculatedNetIncomePercent.toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 p-6 rounded-xl border border-slate-100">
+                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">NPV (WACC 17.3%)</h3>
+                <div className="flex items-baseline space-x-3">
+                  <span className={`text-3xl font-bold ${npv >= 0 ? 'text-slate-800' : 'text-red-600'}`}>
+                    {formatCurrency(npv)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 p-6 rounded-xl border border-slate-100">
+                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">Internal Rate of Return (IRR)</h3>
+                <div className="flex items-baseline space-x-3">
+                  <span className={`text-3xl font-bold ${irr >= 0 ? 'text-indigo-600' : 'text-red-600'}`}>
+                    {(irr * 100).toFixed(1)}%
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
