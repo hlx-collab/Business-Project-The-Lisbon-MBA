@@ -65,6 +65,37 @@ const DEFAULT_FIXED_COSTS_STREAMS: FinancialStream[] = [
   { id: 'fc-ga', name: 'G&A expenses', amounts: ['', '', '', '', ''], isPermanent: true }
 ];
 
+
+const RangeWithButtons = ({ value, onChange, min, max, step = 1 }: any) => {
+  return (
+    <div className="flex items-center space-x-3 w-full">
+      <button 
+        type="button" 
+        onClick={() => onChange({ target: { value: Math.max(Number(min), Number(value) - Number(step)) }})}
+        className="w-7 h-7 flex shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 focus:outline-none"
+      >
+        -
+      </button>
+      <input 
+        type="range" 
+        min={min} 
+        max={max} 
+        step={step}
+        value={value} 
+        onChange={onChange}
+        className="flex-1 accent-indigo-600"
+      />
+      <button 
+        type="button" 
+        onClick={() => onChange({ target: { value: Math.min(Number(max), Number(value) + Number(step)) }})}
+        className="w-7 h-7 flex shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 focus:outline-none"
+      >
+        +
+      </button>
+    </div>
+  );
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<'financials' | 'platform' | 'gross-margin' | 'cash-flow' | 'balance-sheet' | 'sensitivity' | 'highlights'>('financials');
   const [activeMarket, setActiveMarket] = useState<Market>('Portugal');
@@ -72,16 +103,51 @@ export default function App() {
   
   // Sensitivity Analysis Modifiers (Percentages)
   const [sensitivityMods, setSensitivityMods] = useState({
-    revenue: 0,
-    cogs: 0,
-    fixedCosts: 0
+    wacc: 0,
+    Portugal: {
+      newOwners: 0,
+      newProviders: 0,
+      ownerChurn: [0, 0, 0, 0, 0],
+      providerChurn: [0, 0, 0, 0, 0],
+      avgPricePerBooking: 0,
+      commission: 0,
+      subscriptionFee: 0,
+      yearlyBookings: 0,
+      itRnD: 0,
+      marketing: 0
+    },
+    UK: {
+      newOwners: 0,
+      newProviders: 0,
+      ownerChurn: [0, 0, 0, 0, 0],
+      providerChurn: [0, 0, 0, 0, 0],
+      avgPricePerBooking: 0,
+      commission: 0,
+      subscriptionFee: 0,
+      yearlyBookings: 0,
+      itRnD: 0,
+      marketing: 0
+    }
   });
+
+  const currentMods = activeMarket === 'Aggregated' ? null : sensitivityMods[activeMarket as 'Portugal' | 'UK'];
+  const handleModChange = (key: string, value: any) => {
+    if (!currentMods) return;
+    setSensitivityMods({
+      ...sensitivityMods,
+      [activeMarket]: {
+        ...sensitivityMods[activeMarket as 'Portugal' | 'UK'],
+        [key]: value
+      }
+    });
+  };
 
   const providerAnalysisRef = useRef<HTMLDivElement>(null);
   const ownerAnalysisRef = useRef<HTMLDivElement>(null);
   const providerChurnRef = useRef<HTMLDivElement>(null);
   const ownerChurnRef = useRef<HTMLDivElement>(null);
   const financialSummaryRef = useRef<HTMLDivElement>(null);
+  const aggregatedPnLRef = useRef<HTMLDivElement>(null);
   const revenueStreamsRef = useRef<HTMLDivElement>(null);
   const cogsRef = useRef<HTMLDivElement>(null);
   const fixedCostsRef = useRef<HTMLDivElement>(null);
@@ -94,6 +160,8 @@ export default function App() {
   const bookingsChartRef = useRef<HTMLDivElement>(null);
   const cashFlowRef = useRef<HTMLDivElement>(null);
   const balanceSheetRef = useRef<HTMLDivElement>(null);
+  const aggregatedCashFlowRef = useRef<HTMLDivElement>(null);
+  const aggregatedBalanceSheetRef = useRef<HTMLDivElement>(null);
 
   const downloadChart = async (ref: React.RefObject<HTMLDivElement>, filename: string) => {
     if (ref.current) {
@@ -266,8 +334,55 @@ export default function App() {
 
   const years = [0, 1, 2, 3, 4];
 
-  const calculateFinancials = (data: MarketData, marketName: 'Portugal' | 'UK') => {
-    const { platformMetricsStreams, revenueStreams, variableCostsStreams, fixedCostsStreams, chargeSubscription, chargeBookingFees } = data;
+  const baseFinancialsNoMods = React.useMemo(() => computeAllFinancials(markets, activeMarket), [markets, activeMarket]);
+  
+  const getBasePlatformMetric = (name: string, yearIdx?: number) => {
+    let yIdx = yearIdx;
+    if (yIdx === undefined) {
+      yIdx = activeMarket === 'UK' ? 2 : 0;
+    }
+    const stream = baseFinancialsNoMods.platformMetricsStreams.find(s => s.name === name);
+    const val = Number(stream?.amounts?.[yIdx]);
+    return isNaN(val) ? 0 : val;
+  };
+
+  function calculateFinancials(data: MarketData, marketName: 'Portugal' | 'UK', mods?: typeof sensitivityMods.Portugal, waccMod: number = 0) {
+    let { platformMetricsStreams, revenueStreams, variableCostsStreams, fixedCostsStreams, chargeSubscription, chargeBookingFees } = data;
+    if (mods) {
+      const applyMod = (streams: FinancialStream[], nameToMatch: string, modValue: number | number[], type: 'relative' | 'absolute' | 'absoluteArray' = 'relative') => {
+        return streams.map(s => {
+          if (s.name === nameToMatch) {
+            return {
+              ...s,
+              amounts: s.amounts.map((v, i) => {
+                const num = Number(v);
+                if (isNaN(num)) return v;
+                // For UK, only apply modifiers to Y3, Y4, Y5 (indices 2, 3, 4)
+                if (marketName === 'UK' && i < 2) return num;
+                if (type === 'absoluteArray' && Array.isArray(modValue)) {
+                  return num + (modValue[i] || 0);
+                } else if (type === 'absolute' && typeof modValue === 'number') {
+                  return num + modValue;
+                }
+                return num * (1 + (modValue as number) / 100);
+              })
+            };
+          }
+          return s;
+        });
+      };
+      platformMetricsStreams = applyMod(platformMetricsStreams, 'New owners added', mods.newOwners, 'relative');
+      platformMetricsStreams = applyMod(platformMetricsStreams, 'New providers added', mods.newProviders, 'relative');
+      platformMetricsStreams = applyMod(platformMetricsStreams, 'Owner churn rate (%)', mods.ownerChurn, 'absoluteArray');
+      platformMetricsStreams = applyMod(platformMetricsStreams, 'Provider churn rate (%)', mods.providerChurn, 'absoluteArray');
+      platformMetricsStreams = applyMod(platformMetricsStreams, 'Avg price per booking', mods.avgPricePerBooking, 'absolute');
+      platformMetricsStreams = applyMod(platformMetricsStreams, '% of bookings commission', mods.commission, 'absolute');
+      platformMetricsStreams = applyMod(platformMetricsStreams, 'Monthly Subscription fee', mods.subscriptionFee, 'absolute');
+      platformMetricsStreams = applyMod(platformMetricsStreams, '# of yearly bookings per pet owners', mods.yearlyBookings, 'absolute');
+      fixedCostsStreams = applyMod(fixedCostsStreams, 'IT R&D and Support', mods.itRnD, 'relative');
+      fixedCostsStreams = applyMod(fixedCostsStreams, 'Advertisement & Promotion', mods.marketing, 'relative');
+    }
+
 
     const derivedPlatformMetricsStreams = platformMetricsStreams.map(stream => {
       if (stream.id === 'pm-1' || stream.name === 'Number of providers in the platform') {
@@ -548,8 +663,8 @@ export default function App() {
     const totalTaxes = taxByYear.reduce((a, b) => a + b, 0);
     const totalNetIncome = netIncomeByYear.reduce((a, b) => a + b, 0);
 
-    const defRevBalance = years.map(y => totalGrossRevenueByYear[y] * 0.01);
-    const accruedFeesBalance = years.map(y => totalGrossRevenueByYear[y] * 0.03);
+    const defRevBalance = years.map(y => totalRevenueByYear[y] * 0.01);
+    const accruedFeesBalance = years.map(y => totalRevenueByYear[y] * 0.03);
 
     const increaseDefRev: number[] = [];
     const increaseAccruedFees: number[] = [];
@@ -593,7 +708,7 @@ export default function App() {
     const totalEquity = years.map(i => shareCapital[i] + retainedEarnings[i] + netIncomeByYear[i]);
     const totalLiabilities = years.map(i => defRevBalance[i] + accruedFeesBalance[i]);
 
-    const WACC = 0.173;
+    const WACC = (17.3 + (waccMod || 0)) / 100;
     const npv = cashFromOp.reduce((acc, cf, t) => acc + cf / Math.pow(1 + WACC, t + 1), 0);
     
     let irr = 0;
@@ -616,9 +731,34 @@ export default function App() {
         rate = newRate;
     }
 
+    let paybackPeriod: number | null = null;
+    let cumCf = 0;
+    for (let t = 0; t < 5; t++) {
+        const nextCumCf = cumCf + cashFromOp[t];
+        if (cumCf < 0 && nextCumCf >= 0 && paybackPeriod === null) {
+            paybackPeriod = t + Math.abs(cumCf) / cashFromOp[t];
+        }
+        cumCf = nextCumCf;
+    }
+
+    let discountedPaybackPeriod: number | null = null;
+    let cumDcf = 0;
+    for (let t = 0; t < 5; t++) {
+        const dcf = cashFromOp[t] / Math.pow(1 + WACC, t + 1);
+        const nextCumDcf = cumDcf + dcf;
+        if (cumDcf < 0 && nextCumDcf >= 0 && discountedPaybackPeriod === null) {
+            discountedPaybackPeriod = t + Math.abs(cumDcf) / dcf;
+        }
+        cumDcf = nextCumDcf;
+    }
+
     const calculatedNetIncomePercent = totalRevenue > 0 ? (totalNetIncome / totalRevenue) * 100 : 0;
 
+    const totalInvestment = equityInjection.reduce((a, b) => a + b, 0);
+    const roi = totalInvestment > 0 ? totalNetIncome / totalInvestment : 0;
+
     return {
+      equityInjection,
       platformMetricsStreams: derivedPlatformMetricsStreams,
       derivedRevenueStreams,
       derivedVariableCostsStreams,
@@ -660,7 +800,10 @@ export default function App() {
       calculatedOpProfitPercent,
       calculatedNetIncomePercent,
       npv,
-      irr
+      irr,
+      roi,
+      paybackPeriod,
+      discountedPaybackPeriod
     };
   };
 
@@ -672,60 +815,35 @@ export default function App() {
     }));
   };
 
-  const {
-    platformMetricsStreams,
-    revenueStreams,
-    variableCostsStreams,
-    fixedCostsStreams,
-    chargeSubscription,
-    chargeBookingFees,
-    derivedRevenueStreams,
-    derivedVariableCostsStreams,
-    derivedFixedCostsStreams,
-    totalRevenueByYear,
-    totalGrossRevenueByYear,
-    totalVarCostsByYear,
-    totalFixedCostsByYear,
-    totalPlatformMetricsByYear,
-    grossMarginByYear,
-    grossMarginPercentByYear,
-    opProfitByYear,
-    opProfitPercentByYear,
-    netIncomeByYear,
-    taxByYear,
-    defRevBalance,
-    accruedFeesBalance,
-    increaseDefRev,
-    increaseAccruedFees,
-    cashFromOp,
-    cashFromFinancing,
-    netIncreaseInCash,
-    cashBalanceBeginning,
-    cashBalanceEnd,
-    shareCapital,
-    retainedEarnings,
-    totalEquity,
-    totalLiabilities,
-    totalRevenue,
-    totalGrossRevenue,
-    totalVariableCosts,
-    fixedCosts,
-    totalPlatformMetrics,
-    grossMargin,
-    operatingProfit,
-    totalTaxes,
-    totalNetIncome,
-    calculatedMarginPercent,
-    calculatedOpProfitPercent,
-    calculatedNetIncomePercent,
-    npv,
-    irr
-  } = React.useMemo(() => {
+  
+  function computeAllFinancials(markets: any, activeMarket: string, modsPt?: typeof sensitivityMods.Portugal, modsUk?: typeof sensitivityMods.UK, waccMod: number = 0) {
+    const pt = markets.Portugal;
+    let uk = { ...markets.UK };
+    
+    const fillEmptyWithY3 = (streams: FinancialStream[]) => {
+      return streams.map(s => {
+        const y3Val = s.amounts[2];
+        return {
+          ...s,
+          amounts: s.amounts.map(v => (v === '' || v === undefined) ? (y3Val === '' ? 0 : y3Val) : v)
+        };
+      });
+    };
+    
+    uk.platformMetricsStreams = fillEmptyWithY3(uk.platformMetricsStreams);
+    uk.revenueStreams = fillEmptyWithY3(uk.revenueStreams);
+    uk.variableCostsStreams = fillEmptyWithY3(uk.variableCostsStreams);
+    uk.fixedCostsStreams = fillEmptyWithY3(uk.fixedCostsStreams);
+    // Note: boolean arrays chargeSubscription and chargeBookingFees don't have "empty" states, they are false by default.
+    
+    const marketsFilled = { Portugal: pt, UK: uk, Aggregated: undefined };
+
+
     if (activeMarket === 'Aggregated') {
-      const pt = markets.Portugal;
-      const uk = markets.UK;
-      const ptFin = { ...pt, ...calculateFinancials(pt, 'Portugal') };
-      const rawUkFin = { ...uk, ...calculateFinancials(uk, 'UK') };
+      const pt = marketsFilled.Portugal;
+      const uk = marketsFilled.UK;
+      const ptFin = { ...pt, ...calculateFinancials(pt, 'Portugal', modsPt, waccMod) };
+      const rawUkFin = { ...uk, ...calculateFinancials(uk, 'UK', modsUk, waccMod) };
 
       const applyFxToUkFin = (fin: typeof rawUkFin): typeof rawUkFin => {
         const getFxRate = (y: number) => {
@@ -742,6 +860,7 @@ export default function App() {
             return {
               ...s,
               amounts: s.amounts.map((v, y) => {
+                if (v === '') return '';
                 const num = Number(v);
                 return isNaN(num) ? v : Number((num * getFxRate(y)).toFixed(2));
               })
@@ -934,8 +1053,8 @@ export default function App() {
     const totalTaxes = taxByYear.reduce((a, b) => a + b, 0);
     const totalNetIncome = netIncomeByYear.reduce((a, b) => a + b, 0);
 
-    const defRevBalance = years.map(y => totalGrossRevenueByYear[y] * 0.01);
-    const accruedFeesBalance = years.map(y => totalGrossRevenueByYear[y] * 0.03);
+    const defRevBalance = years.map(y => totalRevenueByYear[y] * 0.01);
+    const accruedFeesBalance = years.map(y => totalRevenueByYear[y] * 0.03);
 
     const increaseDefRev: number[] = [];
     const increaseAccruedFees: number[] = [];
@@ -972,7 +1091,7 @@ export default function App() {
     const totalEquity = years.map(i => shareCapital[i] + retainedEarnings[i] + netIncomeByYear[i]);
     const totalLiabilities = years.map(i => defRevBalance[i] + accruedFeesBalance[i]);
 
-    const WACC = 0.173;
+    const WACC = (17.3 + (waccMod || 0)) / 100;
     const npv = cashFromOp.reduce((acc, cf, t) => acc + cf / Math.pow(1 + WACC, t + 1), 0);
     
     let irr = 0;
@@ -995,7 +1114,31 @@ export default function App() {
         rate = newRate;
     }
 
+    let paybackPeriod: number | null = null;
+    let cumCf = 0;
+    for (let t = 0; t < 5; t++) {
+        const nextCumCf = cumCf + cashFromOp[t];
+        if (cumCf < 0 && nextCumCf >= 0 && paybackPeriod === null) {
+            paybackPeriod = t + Math.abs(cumCf) / cashFromOp[t];
+        }
+        cumCf = nextCumCf;
+    }
+
+    let discountedPaybackPeriod: number | null = null;
+    let cumDcf = 0;
+    for (let t = 0; t < 5; t++) {
+        const dcf = cashFromOp[t] / Math.pow(1 + WACC, t + 1);
+        const nextCumDcf = cumDcf + dcf;
+        if (cumDcf < 0 && nextCumDcf >= 0 && discountedPaybackPeriod === null) {
+            discountedPaybackPeriod = t + Math.abs(cumDcf) / dcf;
+        }
+        cumDcf = nextCumDcf;
+    }
+
     const calculatedNetIncomePercent = totalRevenue > 0 ? (totalNetIncome / totalRevenue) * 100 : 0;
+
+      const totalInvestment = ptFin.equityInjection.reduce((a, b) => a + b, 0) + ukFin.equityInjection.reduce((a, b) => a + b, 0);
+      const roi = totalInvestment > 0 ? totalNetIncome / totalInvestment : 0;
 
       return {
         platformMetricsStreams: aggregateStreams(ptFin.platformMetricsStreams, ukFin.platformMetricsStreams, true),
@@ -1021,8 +1164,8 @@ export default function App() {
         defRevBalance,
         accruedFeesBalance,
         increaseDefRev,
-        increaseAccruedFees,
-        cashFromOp,
+    increaseAccruedFees,
+    cashFromOp,
         cashFromFinancing,
         netIncreaseInCash,
         cashBalanceBeginning,
@@ -1044,93 +1187,128 @@ export default function App() {
         calculatedOpProfitPercent,
         calculatedNetIncomePercent,
         npv,
-        irr
+        irr,
+        roi,
+        paybackPeriod,
+        discountedPaybackPeriod
       };
     }
-    const currentMarketData = markets[activeMarket];
+    const currentMarketData = marketsFilled[activeMarket as 'Portugal' | 'UK'];
+
+
     return {
       ...currentMarketData,
-      ...calculateFinancials(currentMarketData, activeMarket as 'Portugal' | 'UK')
+      ...calculateFinancials(currentMarketData, activeMarket as 'Portugal' | 'UK', activeMarket === 'Portugal' ? modsPt : modsUk, waccMod)
     };
-  }, [activeMarket, markets]);
+
+  };
+
+  const {
+
+    platformMetricsStreams,
+    revenueStreams,
+    variableCostsStreams,
+    fixedCostsStreams,
+    chargeSubscription,
+    chargeBookingFees,
+    derivedRevenueStreams,
+    derivedVariableCostsStreams,
+    derivedFixedCostsStreams,
+    totalRevenueByYear,
+    totalGrossRevenueByYear,
+    totalVarCostsByYear,
+    totalFixedCostsByYear,
+    totalPlatformMetricsByYear,
+    grossMarginByYear,
+    grossMarginPercentByYear,
+    opProfitByYear,
+    opProfitPercentByYear,
+    netIncomeByYear,
+    taxByYear,
+    defRevBalance,
+    accruedFeesBalance,
+    increaseDefRev,
+    increaseAccruedFees,
+    cashFromOp,
+    cashFromFinancing,
+    netIncreaseInCash,
+    cashBalanceBeginning,
+    cashBalanceEnd,
+    shareCapital,
+    retainedEarnings,
+    totalEquity,
+    totalLiabilities,
+    totalRevenue,
+    totalGrossRevenue,
+    totalVariableCosts,
+    fixedCosts,
+    totalPlatformMetrics,
+    grossMargin,
+    operatingProfit,
+    totalTaxes,
+    totalNetIncome,
+    calculatedMarginPercent,
+    calculatedOpProfitPercent,
+    calculatedNetIncomePercent,
+    npv,
+    irr,
+    roi,
+    paybackPeriod,
+    discountedPaybackPeriod
+  } = React.useMemo(() => computeAllFinancials(markets, activeMarket), [activeMarket, markets]);
+
+
+  const getBookingsTotal = (marketCode: 'Portugal' | 'UK', adjustedDerived?: any) => {
+    const derived = adjustedDerived ? adjustedDerived : calculateFinancials(markets[marketCode], marketCode);
+    const owners = derived.platformMetricsStreams.find((s: any) => s.name === 'Number of owners in the platform');
+    const bp = derived.platformMetricsStreams.find((s: any) => s.name === '# of yearly bookings per pet owners');
+    let sum = 0;
+    for (let i = 0; i < 5; i++) {
+      sum += (Number(owners?.amounts?.[i]) || 0) * (Number(bp?.amounts?.[i]) || 0);
+    }
+    return sum;
+  };
 
   const sensitivityData = React.useMemo(() => {
-    const data = {
-      grossRev: [] as number[],
-      netRev: [] as number[],
-      cogs: [] as number[],
-      margin: [] as number[],
-      fixedCosts: [] as number[],
-      opProfit: [] as number[],
-      netIncome: [] as number[]
-    };
-    let accumulatedLoss = 0;
+    const adjusted = computeAllFinancials(markets, activeMarket, sensitivityMods.Portugal, sensitivityMods.UK, sensitivityMods.wacc);
 
-    for (let y = 0; y < 5; y++) {
-      const grossRev = totalGrossRevenueByYear[y] * (1 + sensitivityMods.revenue / 100);
-      const netRev = totalRevenueByYear[y] * (1 + sensitivityMods.revenue / 100);
-      const cogs = totalVarCostsByYear[y] * (1 + sensitivityMods.cogs / 100);
-      const fc = totalFixedCostsByYear[y] * (1 + sensitivityMods.fixedCosts / 100);
-      
-      const margin = netRev - cogs;
-      const ebit = margin - fc;
-
-      data.grossRev.push(grossRev);
-      data.netRev.push(netRev);
-      data.cogs.push(cogs);
-      data.margin.push(margin);
-      data.fixedCosts.push(fc);
-      data.opProfit.push(ebit);
-
-      if (ebit < 0) {
-        accumulatedLoss += Math.abs(ebit);
-        data.netIncome.push(ebit);
-      } else {
-        let taxableIncome = 0;
-        if (accumulatedLoss > 0) {
-          if (ebit > accumulatedLoss) {
-            taxableIncome = ebit - accumulatedLoss;
-            accumulatedLoss = 0;
-          } else {
-            taxableIncome = 0;
-            accumulatedLoss -= ebit;
-          }
-        } else {
-          taxableIncome = ebit;
-        }
-        const tax = taxableIncome * 0.21;
-        data.netIncome.push(ebit - tax);
-      }
-    }
-
-    const totals = {
-      grossRev: data.grossRev.reduce((a, b) => a + b, 0),
-      netRev: data.netRev.reduce((a, b) => a + b, 0),
-      cogs: data.cogs.reduce((a, b) => a + b, 0),
-      margin: data.margin.reduce((a, b) => a + b, 0),
-      fixedCosts: data.fixedCosts.reduce((a, b) => a + b, 0),
-      opProfit: data.opProfit.reduce((a, b) => a + b, 0),
-      netIncome: data.netIncome.reduce((a, b) => a + b, 0)
-    };
-
-    const getBookingsTotal = (marketCode: 'Portugal' | 'UK') => {
-      const derived = calculateFinancials(markets[marketCode], marketCode);
-      const owners = derived.platformMetricsStreams.find(s => s.name === 'Number of owners in the platform');
-      const bp = derived.platformMetricsStreams.find(s => s.name === '# of yearly bookings per pet owners');
-      let sum = 0;
-      for (let i = 0; i < 5; i++) {
-        sum += (Number(owners?.amounts?.[i]) || 0) * (Number(bp?.amounts?.[i]) || 0);
-      }
-      return sum;
-    };
+    // If it's aggregated, we still want ptBookings and ukBookings. 
+    // We can run calculateFinancials directly for each market if we want,
+    // or just rely on the fact that aggregated doesn't have ptBookings easily accessible in 'adjusted'.
+    // Actually, let's just do:
+    const ptAdj = activeMarket === 'Aggregated' ? calculateFinancials(markets.Portugal, 'Portugal', sensitivityMods) : (activeMarket === 'Portugal' ? adjusted : null);
+    const ukAdj = activeMarket === 'Aggregated' ? calculateFinancials(markets.UK, 'UK', sensitivityMods) : (activeMarket === 'UK' ? adjusted : null);
 
     return { 
-      data, 
-      totals, 
-      ptBookings: getBookingsTotal('Portugal'), 
-      ukBookings: getBookingsTotal('UK') 
+      data: {
+        grossRev: adjusted.totalGrossRevenueByYear,
+        netRev: adjusted.totalRevenueByYear,
+        cogs: adjusted.totalVarCostsByYear,
+        margin: adjusted.grossMarginByYear,
+        fixedCosts: adjusted.totalFixedCostsByYear,
+        opProfit: adjusted.opProfitByYear,
+        netIncome: adjusted.netIncomeByYear
+      },
+      totals: {
+        grossRev: adjusted.totalGrossRevenue,
+        netRev: adjusted.totalRevenue,
+        cogs: adjusted.totalVariableCosts,
+        margin: adjusted.grossMargin,
+        fixedCosts: adjusted.fixedCosts,
+        opProfit: adjusted.operatingProfit,
+        netIncome: adjusted.totalNetIncome
+      },
+      metrics: {
+        npv: adjusted.npv,
+        irr: adjusted.irr,
+        roi: adjusted.roi,
+        paybackPeriod: adjusted.paybackPeriod,
+        discountedPaybackPeriod: adjusted.discountedPaybackPeriod
+      },
+      ptBookings: ptAdj ? getBookingsTotal('Portugal', ptAdj) : 0, 
+      ukBookings: ukAdj ? getBookingsTotal('UK', ukAdj) : 0
     };
-  }, [totalGrossRevenueByYear, totalRevenueByYear, totalVarCostsByYear, totalFixedCostsByYear, sensitivityMods, markets]);
+  }, [markets, activeMarket, sensitivityMods]);
 
   const getCurrencySymbol = () => activeMarket === 'UK' ? '£' : '€';
 
@@ -1538,9 +1716,25 @@ export default function App() {
                 const prevRef = prevCol ? `${prevCol}${currentRow+1}` : "0";
                 rowData.push({ formula: `ROUND(${prevRef} * (1 - ${churnRef}) + ${newRef}, 0)` });
               } else { rowData.push(val); }
-            } else if (name.includes('%')) {
-              rowData.push(val / 100);
-            } else { rowData.push(val); }
+            } else {
+              const sensCell: Record<string, string> = {
+                'New owners added': 'B4',
+                'New providers added': 'B5',
+                'Owner churn rate (%)': 'B6',
+                'Provider churn rate (%)': 'B7',
+                'Avg price per booking': 'B9',
+                '% of bookings commission': 'B10',
+                'Monthly Subscription fee': 'B11',
+                '# of yearly bookings per pet owners': 'B12'
+              };
+              const cell = sensCell[name];
+              let baseVal = name.includes('%') ? val / 100 : val;
+              if (cell) {
+                rowData.push({ formula: `${baseVal} * (1 + 'Sensitivity Analysis'!${cell}/100)` });
+              } else {
+                rowData.push(baseVal);
+              }
+            }
           }
         });
         sheet.addRow(rowData);
@@ -1706,7 +1900,17 @@ export default function App() {
             const getUkFxMulti = (c: string) => fxRateIdxInUnion >= 0 ? `'UK'!${c}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
             rowData.push({ formula: `'Portugal'!${col}${currentRow + 1} + ('UK'!${col}${currentRow + 1} * ${getUkFxMulti(col)})` });
           } else {
-            rowData.push(getStreamValue(market as Market, 'Fixed Cost', name, y));
+            const val = getStreamValue(market as Market, 'Fixed Cost', name, y);
+            const sensCell: Record<string, string> = {
+              'IT R&D and Support': 'B8',
+              'Advertisement & Promotion': 'B9'
+            };
+            const cell = sensCell[name];
+            if (cell) {
+              rowData.push({ formula: `${val} * (1 + 'Sensitivity Analysis'!${cell}/100)` });
+            } else {
+              rowData.push(val);
+            }
           }
         });
         rowData.push({ formula: `SUM(C${currentRow + 1}:G${currentRow + 1})` });
@@ -1984,7 +2188,7 @@ export default function App() {
           return { formula: `${getCellRef(2 + y, accFeeRowIdx)}-${getCellRef(2 + y - 1, accFeeRowIdx)}` };
         })
       ]); currentRow++;
-
+      
       const netCfOpRowIdx = currentRow;
       sheet.addRow([
         'Cash Flow',
@@ -2130,7 +2334,7 @@ export default function App() {
         'Deferred Revenue',
         ...years.map(y => {
           const col = getColLetter(2 + y);
-          return { formula: `IF(${col}${grossRevRowIdx + 1}=0,0,${col}${grossRevRowIdx + 1}*0.01)` };
+          return { formula: `IF(${col}${revenueTotalRowIdx + 1}=0,0,${col}${revenueTotalRowIdx + 1}*0.01)` };
         })
       ]); currentRow++;
 
@@ -2139,7 +2343,7 @@ export default function App() {
         'Accrued Provider Fees',
         ...years.map(y => {
           const col = getColLetter(2 + y);
-          return { formula: `IF(${col}${grossRevRowIdx + 1}=0,0,${col}${grossRevRowIdx + 1}*0.03)` };
+          return { formula: `IF(${col}${revenueTotalRowIdx + 1}=0,0,${col}${revenueTotalRowIdx + 1}*0.03)` };
         })
       ]); currentRow++;
 
@@ -2215,8 +2419,8 @@ export default function App() {
       sheet.getRow(currentRow).font = { bold: true };
       sheet.addRow([
         'Valuation',
-        'NPV (WACC 17.3%)',
-        { formula: `NPV(0.173, C${netCfOpRowIdx + 1}:G${netCfOpRowIdx + 1})` }
+        'NPV (Adjusted)',
+        { formula: `NPV(0.173 * (1 + 'Sensitivity Analysis'!$B$7/100), C${netCfOpRowIdx + 1}:G${netCfOpRowIdx + 1})` }
       ]);
       sheet.getRow(currentRow + 1).getCell(3).numFmt = '#,##0';
       currentRow++;
@@ -2227,6 +2431,33 @@ export default function App() {
       ]);
       sheet.getRow(currentRow + 1).getCell(3).numFmt = '0.0%';
       currentRow++;
+
+      const opRow = netCfOpRowIdx + 1;
+      const pbFormula = `IF(C${opRow}>=0, 0, IF(SUM(C${opRow}:D${opRow})>=0, 1 + ABS(C${opRow})/D${opRow}, IF(SUM(C${opRow}:E${opRow})>=0, 2 + ABS(SUM(C${opRow}:D${opRow}))/E${opRow}, IF(SUM(C${opRow}:F${opRow})>=0, 3 + ABS(SUM(C${opRow}:E${opRow}))/F${opRow}, IF(SUM(C${opRow}:G${opRow})>=0, 4 + ABS(SUM(C${opRow}:F${opRow}))/G${opRow}, "> 5 Years")))))`;
+
+      const dcf1 = `(C${opRow}/POWER(1.173,1))`;
+      const dcf2 = `(D${opRow}/POWER(1.173,2))`;
+      const dcf3 = `(E${opRow}/POWER(1.173,3))`;
+      const dcf4 = `(F${opRow}/POWER(1.173,4))`;
+      const dcf5 = `(G${opRow}/POWER(1.173,5))`;
+      const dpbFormula = `IF(${dcf1}>=0, 0, IF(${dcf1}+${dcf2}>=0, 1 + ABS(${dcf1})/${dcf2}, IF(${dcf1}+${dcf2}+${dcf3}>=0, 2 + ABS(${dcf1}+${dcf2})/${dcf3}, IF(${dcf1}+${dcf2}+${dcf3}+${dcf4}>=0, 3 + ABS(${dcf1}+${dcf2}+${dcf3})/${dcf4}, IF(${dcf1}+${dcf2}+${dcf3}+${dcf4}+${dcf5}>=0, 4 + ABS(${dcf1}+${dcf2}+${dcf3}+${dcf4})/${dcf5}, "> 5 Years")))))`;
+
+      sheet.addRow([
+        'Valuation',
+        'Payback Period (Years)',
+        { formula: pbFormula }
+      ]);
+      sheet.getRow(currentRow + 1).getCell(3).numFmt = '0.0';
+      currentRow++;
+
+      sheet.addRow([
+        'Valuation',
+        'Discounted Payback Period (Years)',
+        { formula: dpbFormula }
+      ]);
+      sheet.getRow(currentRow + 1).getCell(3).numFmt = '0.0';
+      currentRow++;
+
       sheet.addRow([]); currentRow++;
 
       // Column widths
@@ -2235,7 +2466,82 @@ export default function App() {
       for (let i = 3; i <= 8; i++) sheet.getColumn(i).width = 15;
     });
 
+    
+    // Add Sensitivity Analysis Sheet
+    const sensSheet = workbook.addWorksheet('Sensitivity Analysis');
+    const exportMods = activeMarket === 'Aggregated' ? sensitivityMods.Portugal : sensitivityMods[activeMarket as 'Portugal' | 'UK'];
+    const currentMods = exportMods; // alias for the sheet rows
+
+    sensSheet.getColumn(1).width = 25;
+    for(let i=2; i<=8; i++) sensSheet.getColumn(i).width = 15;
+    
+    sensSheet.addRow(['Sensitivity Analysis', 'Active Market: ' + activeMarket]);
+    sensSheet.getRow(1).font = { bold: true, size: 14 };
+    sensSheet.addRow([]);
+    
+    // Add Modifiers
+    sensSheet.addRow(['Modifiers & Overrides']);
+    sensSheet.getRow(3).font = { bold: true, size: 12 };
+    
+    sensSheet.addRow(['Relative Modifiers (%)', 'Value']);
+    sensSheet.getRow(4).font = { bold: true, size: 11, color: { argb: 'FF475569' } };
+    sensSheet.addRow(['New Owners Added', (currentMods?.newOwners || 0)]);
+    sensSheet.addRow(['New Providers Added', (currentMods?.newProviders || 0)]);
+    sensSheet.addRow(['WACC (%)', 17.3 + (sensitivityMods.wacc || 0)]);
+    sensSheet.addRow(['IT R&D and Support', (currentMods?.itRnD || 0)]);
+    sensSheet.addRow(['Advertisement & Promotion', (currentMods?.marketing || 0)]);
+    sensSheet.addRow([]);
+    
+    sensSheet.addRow(['Absolute Overrides (Per Year)', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5']);
+    sensSheet.getRow(11).font = { bold: true, size: 11, color: { argb: 'FF475569' } };
+    
+    const baseOwnerChurn = years.map(y => getBasePlatformMetric('Owner churn rate (%)', y));
+    const baseProviderChurn = years.map(y => getBasePlatformMetric('Provider churn rate (%)', y));
+    
+    sensSheet.addRow(['Owner Churn Rate (%)', ...years.map(y => baseOwnerChurn[y] + ((currentMods?.ownerChurn && currentMods?.ownerChurn[y]) || 0))]);
+    sensSheet.addRow(['Provider Churn Rate (%)', ...years.map(y => baseProviderChurn[y] + ((currentMods?.providerChurn && currentMods?.providerChurn[y]) || 0))]);
+    sensSheet.addRow([]);
+    
+    sensSheet.addRow(['Absolute Overrides (Constant)', 'Value']);
+    sensSheet.getRow(15).font = { bold: true, size: 11, color: { argb: 'FF475569' } };
+    sensSheet.addRow(['Avg Price per Booking', getBasePlatformMetric('Avg price per booking') + (currentMods?.avgPricePerBooking || 0)]);
+    sensSheet.addRow(['% of Bookings Commission', (getBasePlatformMetric('% of bookings commission') + (currentMods?.commission || 0))]);
+    sensSheet.addRow(['Monthly Subscription Fee', getBasePlatformMetric('Monthly Subscription fee') + (currentMods?.subscriptionFee || 0)]);
+    sensSheet.addRow(['# of yearly bookings per pet owners', getBasePlatformMetric('# of yearly bookings per pet owners') + (currentMods?.yearlyBookings || 0)]);
+    sensSheet.addRow([]);
+
+    // Add Financial Highlights
+    sensSheet.addRow(['Financial Highlights', 'Value']);
+    sensSheet.getRow(sensSheet.lastRow.number).font = { bold: true, size: 11, color: { argb: 'FF475569' } };
+    sensSheet.addRow(['NPV', sensitivityData.metrics.npv]);
+    sensSheet.addRow(['IRR (%)', sensitivityData.metrics.irr !== null ? sensitivityData.metrics.irr * 100 : 'N/A']);
+    sensSheet.addRow(['ROI (%)', sensitivityData.metrics.roi * 100]);
+    sensSheet.addRow(['Payback Period (Years)', sensitivityData.metrics.paybackPeriod !== null ? sensitivityData.metrics.paybackPeriod : '> 5']);
+    sensSheet.addRow(['Discounted Payback Period (Years)', sensitivityData.metrics.discountedPaybackPeriod !== null ? sensitivityData.metrics.discountedPaybackPeriod : '> 5']);
+    sensSheet.addRow([]);
+
+    // Add Results
+    sensSheet.addRow(['Modified P&L', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Total']);
+    const plHeaderRow = sensSheet.lastRow.number;
+    sensSheet.getRow(plHeaderRow).font = { bold: true };
+    
+    sensSheet.addRow(['Gross Revenue', ...sensitivityData.data.grossRev, sensitivityData.totals.grossRev]);
+    sensSheet.addRow(['Net Revenue', ...sensitivityData.data.netRev, sensitivityData.totals.netRev]);
+    sensSheet.addRow(['COGS', ...sensitivityData.data.cogs.map(v => -v), -sensitivityData.totals.cogs]);
+    sensSheet.addRow(['Gross Margin', ...sensitivityData.data.margin, sensitivityData.totals.margin]);
+    sensSheet.addRow(['Fixed Costs', ...sensitivityData.data.fixedCosts.map(v => -v), -sensitivityData.totals.fixedCosts]);
+    sensSheet.addRow(['Operating Profit', ...sensitivityData.data.opProfit, sensitivityData.totals.opProfit]);
+    sensSheet.addRow(['Net Income', ...sensitivityData.data.netIncome, sensitivityData.totals.netIncome]);
+    
+    // Add Bookings summary
+    sensSheet.addRow([]);
+    sensSheet.addRow(['5-Year Total Bookings']);
+    sensSheet.getRow(sensSheet.lastRow.number).font = { bold: true };
+    sensSheet.addRow(['Portugal', sensitivityData.ptBookings]);
+    sensSheet.addRow(['UK', sensitivityData.ukBookings]);
+
     // 2. Add Charts Sheet with Instructions & Static Previews
+
     const chartsSheet = workbook.addWorksheet('Charts & Previews');
     
     // Add helpful header instructions on how to create native, cell-linked charts
@@ -2684,13 +2990,137 @@ export default function App() {
           <div className="space-y-8">
             {/* Inputs Section */}
             <div className="space-y-6">
-              {/* Summary Table */}
+              
+              {/* Aggregated P&L Table */}
+              <div ref={aggregatedPnLRef} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative group">
+                <div className="flex justify-between items-start mb-4">
+                  <div className="flex items-center space-x-3">
+                    <h2 className="text-lg font-medium flex items-center space-x-2">
+                      <Calculator className="w-5 h-5 text-indigo-600" />
+                      <span>Aggregated P&L ({activeMarket})</span>
+                    </h2>
+                    <MarketFlags market={activeMarket} />
+                  </div>
+                  <div data-export-exclude="true" className="flex space-x-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                    <button 
+                      onClick={() => copyChart(aggregatedPnLRef, 'aggregated-pnl')}
+                      className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                      title="Copy to Clipboard"
+                    >
+                      {copiedChart === 'aggregated-pnl' ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                    </button>
+                    <button 
+                      onClick={() => downloadChart(aggregatedPnLRef, 'aggregated-pnl')}
+                      className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                      title="Download as PNG"
+                    >
+                      <Camera className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+            <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100">
+                        <th className="text-left py-2 px-2 font-semibold text-slate-600">Item</th>
+                        {years.map(y => (
+                          <th key={y} className="text-right py-2 px-2 font-semibold text-slate-600">Y{y+1}</th>
+                        ))}
+                        <th className="text-right py-2 px-2 font-semibold text-slate-900 bg-slate-50/50">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-b border-slate-50 bg-slate-50/20">
+                        <td className="py-2 px-2 font-medium text-slate-700 italic">Gross Revenues</td>
+                        {years.map(y => (
+                          <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-400 text-xs">{formatCurrency(totalGrossRevenueByYear[y])}</td>
+                        ))}
+                        <td className="text-right py-2 px-2 font-bold bg-slate-50/50 font-mono whitespace-nowrap text-slate-500 text-xs">{formatCurrency(totalGrossRevenue)}</td>
+                      </tr>
+                      
+                      <tr className="border-b border-slate-50">
+                        <td className="py-2 px-2 font-medium text-slate-700">Net Revenues</td>
+                        {years.map(y => (
+                          <td key={y} className={`text-right py-2 px-2 font-mono whitespace-nowrap ${totalRevenueByYear[y] >= 0 ? 'text-slate-600' : 'text-red-600'}`}>{formatCurrency(totalRevenueByYear[y])}</td>
+                        ))}
+                        <td className={`text-right py-2 px-2 font-bold bg-slate-50/50 font-mono whitespace-nowrap ${totalRevenue >= 0 ? 'text-slate-900' : 'text-red-900'}`}>{formatCurrency(totalRevenue)}</td>
+                      </tr>
+
+                      <tr className="border-b border-slate-50">
+                        <td className="py-2 px-2 font-medium text-slate-700">COGS</td>
+                        {years.map(y => (
+                          <td key={y} className={`text-right py-2 px-2 font-mono whitespace-nowrap ${totalVarCostsByYear[y] >= 0 ? 'text-slate-600' : 'text-red-600'}`}>{formatCurrency(totalVarCostsByYear[y])}</td>
+                        ))}
+                        <td className={`text-right py-2 px-2 font-bold bg-slate-50/50 font-mono whitespace-nowrap ${totalVariableCosts >= 0 ? 'text-slate-900' : 'text-red-900'}`}>{formatCurrency(totalVariableCosts)}</td>
+                      </tr>
+
+                      <tr className="border-b border-slate-50 bg-emerald-50/30">
+                        <td className="py-2 px-2 font-semibold text-emerald-700">Gross Margin</td>
+                        {years.map(y => (
+                          <td key={y} className={`text-right py-2 px-2 font-bold font-mono whitespace-nowrap ${grossMarginByYear[y] >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                            {formatCurrency(grossMarginByYear[y])}
+                          </td>
+                        ))}
+                        <td className={`text-right py-2 px-2 font-bold bg-emerald-50/50 font-mono whitespace-nowrap ${grossMargin >= 0 ? 'text-emerald-800' : 'text-red-800'}`}>
+                          {formatCurrency(grossMargin)}
+                        </td>
+                      </tr>
+
+                      <tr className="border-b border-slate-50">
+                        <td className="py-2 px-2 font-medium text-slate-700">Fixed Costs</td>
+                        {years.map(y => (
+                          <td key={y} className={`text-right py-2 px-2 font-mono whitespace-nowrap ${totalFixedCostsByYear[y] >= 0 ? 'text-slate-600' : 'text-red-600'}`}>{formatCurrency(totalFixedCostsByYear[y])}</td>
+                        ))}
+                        <td className={`text-right py-2 px-2 font-bold bg-slate-50/50 font-mono whitespace-nowrap ${fixedCosts >= 0 ? 'text-slate-900' : 'text-red-900'}`}>{formatCurrency(fixedCosts)}</td>
+                      </tr>
+
+                      <tr className="bg-indigo-50/30 border-b border-indigo-100">
+                        <td className="py-2 px-2 font-semibold text-indigo-700">Operating Profit (EBIT)</td>
+                        {years.map(y => (
+                          <td key={y} className={`text-right py-2 px-2 font-bold font-mono whitespace-nowrap ${opProfitByYear[y] >= 0 ? 'text-indigo-600' : 'text-red-600'}`}>
+                            {formatCurrency(opProfitByYear[y])}
+                          </td>
+                        ))}
+                        <td className={`text-right py-2 px-2 font-bold bg-indigo-50/50 font-mono whitespace-nowrap ${operatingProfit >= 0 ? 'text-indigo-800' : 'text-red-800'}`}>
+                          {formatCurrency(operatingProfit)}
+                        </td>
+                      </tr>
+                      
+                      <tr className="bg-indigo-50/10">
+                        <td className="py-2 px-2 text-xs font-medium text-indigo-600 italic pl-4">Operating Profit %</td>
+                        {years.map(y => (
+                          <td key={y} className={`text-right py-2 px-2 font-mono text-xs whitespace-nowrap ${opProfitPercentByYear[y] >= 0 ? 'text-indigo-500' : 'text-red-500'}`}>
+                            {opProfitPercentByYear[y].toFixed(1)}%
+                          </td>
+                        ))}
+                        <td className={`text-right py-2 px-2 font-bold bg-indigo-50/20 font-mono text-xs whitespace-nowrap ${calculatedOpProfitPercent >= 0 ? 'text-indigo-700' : 'text-red-700'}`}>
+                          {calculatedOpProfitPercent.toFixed(1)}%
+                        </td>
+                      </tr>
+
+                      <tr className="bg-emerald-50/30">
+                        <td className="py-3 px-2 font-bold text-emerald-800">Net Income</td>
+                        {years.map(y => (
+                          <td key={y} className={`text-right py-3 px-2 font-bold font-mono whitespace-nowrap ${netIncomeByYear[y] >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                            {formatCurrency(netIncomeByYear[y])}
+                          </td>
+                        ))}
+                        <td className={`text-right py-3 px-2 font-bold bg-emerald-50/50 font-mono whitespace-nowrap ${totalNetIncome >= 0 ? 'text-emerald-900' : 'text-red-900'}`}>
+                          {formatCurrency(totalNetIncome)}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Detailed Summary Table */}
               <div ref={financialSummaryRef} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative group">
                 <div className="flex justify-between items-start mb-4">
                   <div className="flex items-center space-x-3">
                     <h2 className="text-lg font-medium flex items-center space-x-2">
                       <Calculator className="w-5 h-5 text-indigo-600" />
-                      <span>Financial Summary ({activeMarket})</span>
+                      <span>Detailed P&L ({activeMarket})</span>
                     </h2>
                     <MarketFlags market={activeMarket} />
                   </div>
@@ -3548,12 +3978,119 @@ export default function App() {
           </div>
         </div>
         <div className={activeTab === 'cash-flow' ? 'block' : 'opacity-0 pointer-events-none absolute -z-10 w-full'}>
+          
+              {/* Aggregated Cash Flow Statement */}
+              <div ref={aggregatedCashFlowRef} className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative group mt-8">
+                <div className="flex justify-between items-start mb-6">
+                  <div className="flex items-center space-x-3">
+                    <h2 className="text-xl font-semibold flex items-center space-x-2">
+                      <Activity className="w-6 h-6 text-indigo-600" />
+                      <span>Aggregated Cash Flow Statement ({activeMarket})</span>
+                    </h2>
+                    <MarketFlags market={activeMarket} />
+                  </div>
+                  <div data-export-exclude="true" className="flex space-x-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                    <button 
+                      onClick={() => copyChart(aggregatedCashFlowRef, 'aggregated-cash-flow')}
+                      className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                      title="Copy to Clipboard"
+                    >
+                      {copiedChart === 'aggregated-cash-flow' ? <Check className="w-5 h-5 text-green-500" /> : <Copy className="w-5 h-5" />}
+                    </button>
+                    <button 
+                      onClick={() => downloadChart(aggregatedCashFlowRef, 'aggregated-cash-flow')}
+                      className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                      title="Download as PNG"
+                    >
+                      <Camera className="w-5 h-5" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100">
+                        <th className="text-left py-3 px-2 font-semibold text-slate-600">Metric</th>
+                        {years.map(y => (
+                          <th key={y} className="text-right py-3 px-2 font-semibold text-slate-600">Year {y + 1}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-b border-slate-50 bg-slate-50/50">
+                        <td colSpan={6} className="py-2 px-2 font-bold text-slate-900">Cash Flow from Operating Activities</td>
+                      </tr>
+                      <tr className="border-b border-slate-50">
+                        <td className="py-2 px-2 font-medium text-slate-700 pl-4">Net Income</td>
+                        {years.map(y => (
+                          <td key={y} className={`text-right py-2 px-2 font-mono whitespace-nowrap ${netIncomeByYear[y] >= 0 ? 'text-slate-600' : 'text-red-600'}`}>{formatCurrency(netIncomeByYear[y])}</td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-slate-50">
+                        <td className="py-2 px-2 text-sm text-slate-600 pl-8">(+) Increase in Deferred Revenue</td>
+                        {years.map(y => (
+                          <td key={y} className={`text-right py-2 px-2 font-mono whitespace-nowrap ${increaseDefRev[y] >= 0 ? 'text-slate-600' : 'text-red-600'}`}>{formatCurrency(increaseDefRev[y])}</td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-slate-50">
+                        <td className="py-2 px-2 text-sm text-slate-600 pl-8">(+) Increase in Accrued Provider Fees</td>
+                        {years.map(y => (
+                          <td key={y} className={`text-right py-2 px-2 font-mono whitespace-nowrap ${increaseAccruedFees[y] >= 0 ? 'text-slate-600' : 'text-red-600'}`}>{formatCurrency(increaseAccruedFees[y])}</td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-slate-50 bg-indigo-50/20">
+                        <td className="py-2 px-2 font-semibold text-indigo-800 pl-4">= Net Cash from Operating Activities</td>
+                        {years.map(y => (
+                          <td key={y} className={`text-right py-2 px-2 font-bold font-mono whitespace-nowrap ${cashFromOp[y] >= 0 ? 'text-indigo-700' : 'text-red-700'}`}>{formatCurrency(cashFromOp[y])}</td>
+                        ))}
+                      </tr>
+
+                      <tr className="border-b border-slate-50 bg-slate-50/50">
+                        <td colSpan={6} className="py-2 px-2 font-bold text-slate-900 pt-6">Cash Flow from Financing Activities</td>
+                      </tr>
+                      <tr className="border-b border-slate-50">
+                        <td className="py-2 px-2 font-medium text-slate-700 pl-4">(+) Issuance of Share Capital (Equity)</td>
+                        {years.map(y => (
+                          <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-600">{formatCurrency(cashFromFinancing[y])}</td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-slate-50 bg-indigo-50/20">
+                        <td className="py-2 px-2 font-semibold text-indigo-800 pl-4">= Net Cash from Financing Activities</td>
+                        {years.map(y => (
+                          <td key={y} className="text-right py-2 px-2 font-bold font-mono whitespace-nowrap text-slate-600">{formatCurrency(cashFromFinancing[y])}</td>
+                        ))}
+                      </tr>
+                      
+                      <tr className="border-b border-slate-100 bg-slate-100/50">
+                        <td className="py-3 px-2 font-bold text-slate-900 pt-6">Net Increase in Cash for the Period</td>
+                        {years.map(y => (
+                          <td key={y} className={`text-right py-3 px-2 font-bold font-mono whitespace-nowrap ${netIncreaseInCash[y] >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatCurrency(netIncreaseInCash[y])}</td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-slate-50">
+                        <td className="py-2 px-2 font-medium text-slate-600 text-sm">Cash Balance at Beginning of Period</td>
+                        {years.map(y => (
+                          <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-500 text-sm">{formatCurrency(cashBalanceBeginning[y])}</td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-slate-50 bg-emerald-50/20">
+                        <td className="py-3 px-2 font-bold text-emerald-800">Cash Balance at End of Period</td>
+                        {years.map(y => (
+                          <td key={y} className={`text-right py-3 px-2 font-bold font-mono whitespace-nowrap ${cashBalanceEnd[y] >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatCurrency(cashBalanceEnd[y])}</td>
+                        ))}
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
           <div ref={cashFlowRef} className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative group">
             <div className="flex justify-between items-start mb-6">
               <div className="flex items-center space-x-3">
                 <h2 className="text-xl font-semibold flex items-center space-x-2">
                   <Activity className="w-6 h-6 text-indigo-600" />
-                  <span>Cash Flow Statement</span>
+                  <span>Detailed Cash Flow Statement ({activeMarket})</span>
                 </h2>
                 <MarketFlags market={activeMarket} />
               </div>
@@ -3683,12 +4220,129 @@ export default function App() {
         </div>
 
         <div className={activeTab === 'balance-sheet' ? 'block' : 'opacity-0 pointer-events-none absolute -z-10 w-full'}>
+          
+              {/* Aggregated Balance Sheet */}
+              <div ref={aggregatedBalanceSheetRef} className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative group mt-8">
+                <div className="flex justify-between items-start mb-6">
+                  <div className="flex items-center space-x-3">
+                    <h2 className="text-xl font-semibold flex items-center space-x-2">
+                      <Calculator className="w-6 h-6 text-indigo-600" />
+                      <span>Aggregated Balance Sheet ({activeMarket})</span>
+                    </h2>
+                    <MarketFlags market={activeMarket} />
+                  </div>
+                  <div data-export-exclude="true" className="flex space-x-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                    <button 
+                      onClick={() => copyChart(aggregatedBalanceSheetRef, 'aggregated-balance-sheet')}
+                      className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                      title="Copy to Clipboard"
+                    >
+                      {copiedChart === 'aggregated-balance-sheet' ? <Check className="w-5 h-5 text-green-500" /> : <Copy className="w-5 h-5" />}
+                    </button>
+                    <button 
+                      onClick={() => downloadChart(aggregatedBalanceSheetRef, 'aggregated-balance-sheet')}
+                      className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                      title="Download as PNG"
+                    >
+                      <Camera className="w-5 h-5" />
+                    </button>
+                  </div>
+                </div>
+                
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100">
+                        <th className="text-left py-3 px-2 font-semibold text-slate-600">Metric</th>
+                        {years.map(y => (
+                          <th key={y} className="text-right py-3 px-2 font-semibold text-slate-600">Year {y + 1}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-b border-slate-50 bg-indigo-50/30">
+                        <td colSpan={6} className="py-3 px-2 font-bold text-indigo-900">ASSETS</td>
+                      </tr>
+                      <tr className="border-b border-slate-50">
+                        <td className="py-2 px-2 font-medium text-slate-600 pl-8">Cash & Cash Equivalents</td>
+                        {years.map(y => (
+                          <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-700">{formatCurrency(cashBalanceEnd[y])}</td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-slate-50 bg-indigo-50/10">
+                        <td className="py-3 px-2 font-bold text-indigo-800 pl-4">TOTAL ASSETS</td>
+                        {years.map(y => (
+                          <td key={y} className="text-right py-3 px-2 font-bold font-mono whitespace-nowrap text-indigo-900">{formatCurrency(cashBalanceEnd[y])}</td>
+                        ))}
+                      </tr>
+
+                      <tr className="border-b border-slate-50 bg-indigo-50/30">
+                        <td colSpan={6} className="py-3 px-2 font-bold text-indigo-900 mt-4">LIABILITIES</td>
+                      </tr>
+                      <tr className="border-b border-slate-50">
+                        <td className="py-2 px-2 font-medium text-slate-600 pl-8">Deferred Revenue</td>
+                        {years.map(y => (
+                          <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-700">{formatCurrency(defRevBalance[y])}</td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-slate-50">
+                        <td className="py-2 px-2 font-medium text-slate-600 pl-8">Accrued Provider Fees</td>
+                        {years.map(y => (
+                          <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-700">{formatCurrency(accruedFeesBalance[y])}</td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-slate-50 bg-indigo-50/10">
+                        <td className="py-3 px-2 font-bold text-indigo-800 pl-4">TOTAL LIABILITIES</td>
+                        {years.map(y => (
+                          <td key={y} className="text-right py-3 px-2 font-bold font-mono whitespace-nowrap text-indigo-900">{formatCurrency(totalLiabilities[y])}</td>
+                        ))}
+                      </tr>
+
+                      <tr className="border-b border-slate-50 bg-indigo-50/30">
+                        <td colSpan={6} className="py-3 px-2 font-bold text-indigo-900 mt-4">EQUITY</td>
+                      </tr>
+                      <tr className="border-b border-slate-50">
+                        <td className="py-2 px-2 font-medium text-slate-600 pl-8">Share Capital</td>
+                        {years.map(y => (
+                          <td key={y} className="text-right py-2 px-2 font-mono whitespace-nowrap text-slate-700">{formatCurrency(shareCapital[y])}</td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-slate-50">
+                        <td className="py-2 px-2 font-medium text-slate-600 pl-8">Retained Earnings</td>
+                        {years.map(y => (
+                          <td key={y} className={`text-right py-2 px-2 font-mono whitespace-nowrap ${retainedEarnings[y] >= 0 ? 'text-slate-700' : 'text-red-600'}`}>{formatCurrency(retainedEarnings[y])}</td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-slate-50">
+                        <td className="py-2 px-2 font-medium text-slate-600 pl-8">Net Income</td>
+                        {years.map(y => (
+                          <td key={y} className={`text-right py-2 px-2 font-mono whitespace-nowrap ${netIncomeByYear[y] >= 0 ? 'text-slate-700' : 'text-red-600'}`}>{formatCurrency(netIncomeByYear[y])}</td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-slate-50 bg-indigo-50/10">
+                        <td className="py-3 px-2 font-bold text-indigo-800 pl-4">TOTAL EQUITY</td>
+                        {years.map(y => (
+                          <td key={y} className={`text-right py-3 px-2 font-bold font-mono whitespace-nowrap ${totalEquity[y] >= 0 ? 'text-indigo-900' : 'text-red-700'}`}>{formatCurrency(totalEquity[y])}</td>
+                        ))}
+                      </tr>
+
+                      <tr className="border-b border-slate-100 bg-slate-100/80">
+                        <td className="py-3 px-2 font-bold text-slate-900">TOTAL LIABILITIES & EQUITY</td>
+                        {years.map(y => (
+                          <td key={y} className="text-right py-3 px-2 font-bold font-mono whitespace-nowrap text-slate-900">{formatCurrency(totalLiabilities[y] + totalEquity[y])}</td>
+                        ))}
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
           <div ref={balanceSheetRef} className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative group">
             <div className="flex justify-between items-start mb-6">
               <div className="flex items-center space-x-3">
                 <h2 className="text-xl font-semibold flex items-center space-x-2">
                   <Calculator className="w-6 h-6 text-indigo-600" />
-                  <span>Balance Sheet</span>
+                  <span>Detailed Balance Sheet ({activeMarket})</span>
                 </h2>
                 <MarketFlags market={activeMarket} />
               </div>
@@ -3857,61 +4511,172 @@ export default function App() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-10">
-              {/* Sliders */}
+            {currentMods ? (<div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-10">
+
               <div className="space-y-4">
                 <label className="text-sm font-medium text-slate-700 flex justify-between">
-                  <span>Revenue Adjustment</span>
-                  <span className={sensitivityMods.revenue > 0 ? 'text-green-600 font-bold' : sensitivityMods.revenue < 0 ? 'text-red-600 font-bold' : 'text-slate-500 font-bold'}>
-                    {sensitivityMods.revenue > 0 ? '+' : ''}{sensitivityMods.revenue}%
+                  <span>New Owners Added</span>
+                  <span className={(currentMods?.newOwners || 0) > 0 ? 'text-indigo-600 font-bold' : (currentMods?.newOwners || 0) < 0 ? 'text-rose-600 font-bold' : 'text-slate-500 font-bold'}>
+                    {(currentMods?.newOwners || 0) > 0 ? '+' : ''}{(currentMods?.newOwners || 0)}%
                   </span>
                 </label>
-                <input 
-                  type="range" 
-                  min="-50" 
-                  max="50" 
-                  value={sensitivityMods.revenue} 
-                  onChange={e => setSensitivityMods({...sensitivityMods, revenue: Number(e.target.value)})}
-                  className="w-full accent-indigo-600"
-                />
-                <p className="text-xs text-slate-500">Applies a percentage change to total gross revenues across all years.</p>
+                <RangeWithButtons min="-50" max="50" value={(currentMods?.newOwners || 0)} onChange={(e: any) => handleModChange('newOwners', Number(e.target.value))} />
               </div>
+
               <div className="space-y-4">
                 <label className="text-sm font-medium text-slate-700 flex justify-between">
-                  <span>COGS Adjustment</span>
-                  <span className={sensitivityMods.cogs > 0 ? 'text-red-600 font-bold' : sensitivityMods.cogs < 0 ? 'text-green-600 font-bold' : 'text-slate-500 font-bold'}>
-                    {sensitivityMods.cogs > 0 ? '+' : ''}{sensitivityMods.cogs}%
+                  <span>New Providers Added</span>
+                  <span className={(currentMods?.newProviders || 0) > 0 ? 'text-indigo-600 font-bold' : (currentMods?.newProviders || 0) < 0 ? 'text-rose-600 font-bold' : 'text-slate-500 font-bold'}>
+                    {(currentMods?.newProviders || 0) > 0 ? '+' : ''}{(currentMods?.newProviders || 0)}%
                   </span>
                 </label>
-                <input 
-                  type="range" 
-                  min="-50" 
-                  max="50" 
-                  value={sensitivityMods.cogs} 
-                  onChange={e => setSensitivityMods({...sensitivityMods, cogs: Number(e.target.value)})}
-                  className="w-full accent-indigo-600"
-                />
-                <p className="text-xs text-slate-500">Applies a percentage change to variable costs across all years.</p>
+                <RangeWithButtons min="-50" max="50" value={(currentMods?.newProviders || 0)} onChange={(e: any) => handleModChange('newProviders', Number(e.target.value))} />
               </div>
+
+              <div className="space-y-4 col-span-1 md:col-span-3">
+                <label className="text-sm font-medium text-slate-700">Owner Churn Rate (%) - Absolute Value</label>
+                <div className="grid grid-cols-5 gap-4">
+                  {years.map(y => {
+                    const base = getBasePlatformMetric('Owner churn rate (%)', y);
+                    const val = base + ((currentMods?.ownerChurn && currentMods?.ownerChurn[y]) || 0);
+                    return (
+                      <div key={y} className="flex flex-col space-y-1">
+                        <span className="text-xs text-slate-500">Year {y+1}</span>
+                        <input 
+                          type="number"
+                          step="1"
+                          value={val.toFixed(1)}
+                          onChange={e => {
+                            const newVal = Array.isArray(currentMods?.ownerChurn) ? [...currentMods?.ownerChurn] : [0,0,0,0,0];
+                            newVal[y] = Number(e.target.value) - base;
+                            handleModChange('ownerChurn', newVal);
+                          }}
+                          className="border border-slate-300 rounded p-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-4 col-span-1 md:col-span-3">
+                <label className="text-sm font-medium text-slate-700">Provider Churn Rate (%) - Absolute Value</label>
+                <div className="grid grid-cols-5 gap-4">
+                  {years.map(y => {
+                    const base = getBasePlatformMetric('Provider churn rate (%)', y);
+                    const val = base + ((currentMods?.providerChurn && currentMods?.providerChurn[y]) || 0);
+                    return (
+                      <div key={y} className="flex flex-col space-y-1">
+                        <span className="text-xs text-slate-500">Year {y+1}</span>
+                        <input 
+                          type="number"
+                          step="1"
+                          value={val.toFixed(1)}
+                          onChange={e => {
+                            const newVal = Array.isArray(currentMods?.providerChurn) ? [...currentMods?.providerChurn] : [0,0,0,0,0];
+                            newVal[y] = Number(e.target.value) - base;
+                            handleModChange('providerChurn', newVal);
+                          }}
+                          className="border border-slate-300 rounded p-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div className="space-y-4">
                 <label className="text-sm font-medium text-slate-700 flex justify-between">
-                  <span>Fixed Costs Adjustment</span>
-                  <span className={sensitivityMods.fixedCosts > 0 ? 'text-red-600 font-bold' : sensitivityMods.fixedCosts < 0 ? 'text-green-600 font-bold' : 'text-slate-500 font-bold'}>
-                    {sensitivityMods.fixedCosts > 0 ? '+' : ''}{sensitivityMods.fixedCosts}%
+                  <span>WACC</span>
+                  <span className="text-indigo-600 font-bold">
+                    {(17.3 + sensitivityMods.wacc).toFixed(1)}%
                   </span>
                 </label>
-                <input 
-                  type="range" 
-                  min="-50" 
-                  max="50" 
-                  value={sensitivityMods.fixedCosts} 
-                  onChange={e => setSensitivityMods({...sensitivityMods, fixedCosts: Number(e.target.value)})}
-                  className="w-full accent-indigo-600"
-                />
-                <p className="text-xs text-slate-500">Applies a percentage change to fixed costs across all years.</p>
+                <RangeWithButtons min="0" max="50" step="0.1" value={17.3 + sensitivityMods.wacc} onChange={(e: any) => setSensitivityMods({...sensitivityMods, wacc: Number(e.target.value) - 17.3})} />
+              </div>
+
+              <div className="space-y-4">
+                <label className="text-sm font-medium text-slate-700 flex justify-between">
+                  <span>Avg Price per Booking</span>
+                  <span className="text-indigo-600 font-bold">
+                    {formatCurrency(getBasePlatformMetric('Avg price per booking') + (currentMods?.avgPricePerBooking || 0))}
+                  </span>
+                </label>
+                <RangeWithButtons min={Math.max(0, getBasePlatformMetric('Avg price per booking') - 50)} max={getBasePlatformMetric('Avg price per booking') + 50} value={getBasePlatformMetric('Avg price per booking') + (currentMods?.avgPricePerBooking || 0)} onChange={(e: any) => handleModChange('avgPricePerBooking', Number(e.target.value) - getBasePlatformMetric('Avg price per booking'))} />
+              </div>
+
+              <div className="space-y-4">
+                <label className="text-sm font-medium text-slate-700 flex justify-between">
+                  <span>% of Bookings Commission</span>
+                  <span className="text-indigo-600 font-bold">
+                    {(getBasePlatformMetric('% of bookings commission') + (currentMods?.commission || 0)).toFixed(1)}%
+                  </span>
+                </label>
+                <RangeWithButtons min={0} max={100} step={0.5} value={getBasePlatformMetric('% of bookings commission') + (currentMods?.commission || 0)} onChange={(e: any) => handleModChange('commission', Number(e.target.value) - getBasePlatformMetric('% of bookings commission'))} />
+              </div>
+
+              <div className="space-y-4">
+                <label className="text-sm font-medium text-slate-700 flex justify-between">
+                  <span>Monthly Subscription Fee</span>
+                  <span className="text-indigo-600 font-bold">
+                    {formatCurrency(getBasePlatformMetric('Monthly Subscription fee') + (currentMods?.subscriptionFee || 0))}
+                  </span>
+                </label>
+                <RangeWithButtons min={0} max={getBasePlatformMetric('Monthly Subscription fee') + 100} value={getBasePlatformMetric('Monthly Subscription fee') + (currentMods?.subscriptionFee || 0)} onChange={(e: any) => handleModChange('subscriptionFee', Number(e.target.value) - getBasePlatformMetric('Monthly Subscription fee'))} />
+              </div>
+
+              <div className="space-y-4">
+                <label className="text-sm font-medium text-slate-700 flex justify-between">
+                  <span># of Yearly Bookings per Owner</span>
+                  <span className="text-indigo-600 font-bold">
+                    {(getBasePlatformMetric('# of yearly bookings per pet owners') + (currentMods?.yearlyBookings || 0)).toFixed(1)}
+                  </span>
+                </label>
+                <RangeWithButtons min={0} max={Math.max(10, getBasePlatformMetric('# of yearly bookings per pet owners') + 10)} step={0.5} value={getBasePlatformMetric('# of yearly bookings per pet owners') + (currentMods?.yearlyBookings || 0)} onChange={(e: any) => handleModChange('yearlyBookings', Number(e.target.value) - getBasePlatformMetric('# of yearly bookings per pet owners'))} />
+              </div>
+
+              <div className="space-y-4">
+                <label className="text-sm font-medium text-slate-700 flex justify-between">
+                  <span>IT R&D and Support</span>
+                  <span className={(currentMods?.itRnD || 0) > 0 ? 'text-indigo-600 font-bold' : (currentMods?.itRnD || 0) < 0 ? 'text-rose-600 font-bold' : 'text-slate-500 font-bold'}>
+                    {(currentMods?.itRnD || 0) > 0 ? '+' : ''}{(currentMods?.itRnD || 0)}%
+                  </span>
+                </label>
+                <RangeWithButtons min="-50" max="50" value={(currentMods?.itRnD || 0)} onChange={(e: any) => handleModChange('itRnD', Number(e.target.value))} />
+              </div>
+
+              <div className="space-y-4">
+                <label className="text-sm font-medium text-slate-700 flex justify-between">
+                  <span>Advertisement & Promotion</span>
+                  <span className={(currentMods?.marketing || 0) > 0 ? 'text-indigo-600 font-bold' : (currentMods?.marketing || 0) < 0 ? 'text-rose-600 font-bold' : 'text-slate-500 font-bold'}>
+                    {(currentMods?.marketing || 0) > 0 ? '+' : ''}{(currentMods?.marketing || 0)}%
+                  </span>
+                </label>
+                <RangeWithButtons min="-50" max="50" value={(currentMods?.marketing || 0)} onChange={(e: any) => handleModChange('marketing', Number(e.target.value))} />
+              </div>
+            </div>) : (<div className="flex flex-col items-center justify-center p-12 bg-slate-50 border border-slate-100 rounded-xl mb-10"><p className="text-slate-500 font-medium mb-2">Sensitivity modifiers are applied per market.</p><p className="text-slate-400 text-sm">Please select Portugal or UK from the market selector above to edit sensitivity variables.</p></div>)}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col">
+                <span className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">NPV</span>
+                <span className="text-lg font-bold text-slate-900">{formatCurrency(sensitivityData.metrics.npv)}</span>
+              </div>
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col">
+                <span className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">IRR</span>
+                <span className="text-lg font-bold text-slate-900">{sensitivityData.metrics.irr !== null ? (sensitivityData.metrics.irr * 100).toFixed(1) + '%' : 'N/A'}</span>
+              </div>
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col">
+                <span className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">ROI</span>
+                <span className="text-lg font-bold text-slate-900">{(sensitivityData.metrics.roi * 100).toFixed(1)}%</span>
+              </div>
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col">
+                <span className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Payback Period</span>
+                <span className="text-lg font-bold text-slate-900">{sensitivityData.metrics.paybackPeriod !== null ? sensitivityData.metrics.paybackPeriod.toFixed(1) + ' Yrs' : '> 5 Yrs'}</span>
+              </div>
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col">
+                <span className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Discounted Payback</span>
+                <span className="text-lg font-bold text-slate-900">{sensitivityData.metrics.discountedPaybackPeriod !== null ? sensitivityData.metrics.discountedPaybackPeriod.toFixed(1) + ' Yrs' : '> 5 Yrs'}</span>
               </div>
             </div>
-
             <div className="overflow-x-auto">
               <table className="w-full text-sm text-left">
                 <thead className="bg-slate-50 border-y border-slate-200">
@@ -4020,6 +4785,8 @@ export default function App() {
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              </div>
+
               <div className="bg-slate-50 p-6 rounded-xl border border-slate-100">
                 <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">Total Operating Profit</h3>
                 <div className="flex items-baseline space-x-3">
@@ -4045,7 +4812,7 @@ export default function App() {
               </div>
 
               <div className="bg-slate-50 p-6 rounded-xl border border-slate-100">
-                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">NPV (WACC 17.3%)</h3>
+                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">NPV (WACC {(17.3 + sensitivityMods.wacc).toFixed(1)}%)</h3>
                 <div className="flex items-baseline space-x-3">
                   <span className={`text-3xl font-bold ${npv >= 0 ? 'text-slate-800' : 'text-red-600'}`}>
                     {formatCurrency(npv)}
@@ -4061,11 +4828,38 @@ export default function App() {
                   </span>
                 </div>
               </div>
+
+              <div className="bg-slate-50 p-6 rounded-xl border border-slate-100">
+                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">Payback Period</h3>
+                <div className="flex items-baseline space-x-3">
+                  <span className={`text-3xl font-bold ${paybackPeriod !== null && paybackPeriod <= 5 ? 'text-slate-800' : 'text-red-600'}`}>
+                    {paybackPeriod !== null ? `${paybackPeriod.toFixed(1)} Years` : '> 5 Years'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 p-6 rounded-xl border border-slate-100">
+                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">Discounted Payback</h3>
+                <div className="flex items-baseline space-x-3">
+                  <span className={`text-3xl font-bold ${discountedPaybackPeriod !== null && discountedPaybackPeriod <= 5 ? 'text-slate-800' : 'text-red-600'}`}>
+                    {discountedPaybackPeriod !== null ? `${discountedPaybackPeriod.toFixed(1)} Years` : '> 5 Years'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 p-6 rounded-xl border border-slate-100">
+                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">Return on Investment (ROI)</h3>
+                <div className="flex items-baseline space-x-3">
+                  <span className={`text-3xl font-bold ${roi >= 0 ? 'text-indigo-600' : 'text-red-600'}`}>
+                    {(roi * 100).toFixed(1)}%
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </div>
+    
   );
 }
 
