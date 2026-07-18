@@ -14,7 +14,7 @@ interface FinancialStream {
   isCalculated?: boolean;
 }
 
-type Market = 'Portugal' | 'UK' | 'Aggregated';
+type Market = 'Portugal' | 'UK' | 'Consolidated';
 
 interface MarketData {
   platformMetricsStreams: FinancialStream[];
@@ -97,8 +97,11 @@ const RangeWithButtons = ({ value, onChange, min, max, step = 1 }: any) => {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'financials' | 'platform' | 'gross-margin' | 'cash-flow' | 'balance-sheet' | 'sensitivity' | 'highlights'>('financials');
+  const [activeTab, setActiveTab] = useState<'financials' | 'platform' | 'gross-margin' | 'cash-flow' | 'balance-sheet' | 'sensitivity' | 'highlights' | 'monte-carlo'>('financials');
   const [activeMarket, setActiveMarket] = useState<Market>('Portugal');
+  const [mcIsRunning, setMcIsRunning] = useState(false);
+  const [mcResults, setMcResults] = useState<{npv: number[]; irr: number[]; roi: number[]; totalRoi: number[]; payback: number[]; opProfit: number[]; netProfit: number[];} | null>(null);
+  const [mcIterations, setMcIterations] = useState(1000);
   const [copiedChart, setCopiedChart] = useState<string | null>(null);
   
   // Sensitivity Analysis Modifiers (Percentages)
@@ -114,7 +117,8 @@ export default function App() {
       subscriptionFee: 0,
       yearlyBookings: 0,
       itRnD: 0,
-      marketing: 0
+      marketing: 0,
+      unitCustomerSupportCostOwners: [0, 0, 0, 0, 0]
     },
     UK: {
       newOwners: 0,
@@ -126,11 +130,12 @@ export default function App() {
       subscriptionFee: 0,
       yearlyBookings: 0,
       itRnD: 0,
-      marketing: 0
+      marketing: 0,
+      unitCustomerSupportCostOwners: [0, 0, 0, 0, 0]
     }
   });
 
-  const currentMods = activeMarket === 'Aggregated' ? null : sensitivityMods[activeMarket as 'Portugal' | 'UK'];
+  const currentMods = activeMarket === 'Consolidated' ? null : sensitivityMods[activeMarket as 'Portugal' | 'UK'];
   const handleModChange = (key: string, value: any) => {
     if (!currentMods) return;
     setSensitivityMods({
@@ -194,14 +199,23 @@ export default function App() {
           filter: filter as any
         });
         if (blob) {
-          await navigator.clipboard.write([
-            new ClipboardItem({ 'image/png': blob })
-          ]);
-          setCopiedChart(chartId);
-          setTimeout(() => setCopiedChart(null), 2000);
+          if (document.hasFocus()) {
+            await navigator.clipboard.write([
+              new ClipboardItem({ 'image/png': blob })
+            ]);
+            setCopiedChart(chartId);
+            setTimeout(() => setCopiedChart(null), 2000);
+          } else {
+            console.warn('Document is not focused. Unable to write to clipboard.');
+            // Fallback: download the image instead
+            saveAs(blob, `${chartId}.png`);
+            setCopiedChart(chartId);
+            setTimeout(() => setCopiedChart(null), 2000);
+          }
         }
       } catch (err) {
-        console.error('Failed to copy image:', err);
+        console.warn('Failed to copy image:', err);
+        // Fallback: don't crash, just log warning
       }
     }
   };
@@ -210,7 +224,7 @@ export default function App() {
     const flags = {
       Portugal: [{ url: 'https://flagcdn.com/pt.svg', alt: 'Portugal' }],
       UK: [{ url: 'https://flagcdn.com/gb.svg', alt: 'UK' }],
-      Aggregated: [
+      Consolidated: [
         { url: 'https://flagcdn.com/pt.svg', alt: 'Portugal' },
         { url: 'https://flagcdn.com/gb.svg', alt: 'UK' }
       ]
@@ -336,6 +350,87 @@ export default function App() {
 
   const baseFinancialsNoMods = React.useMemo(() => computeAllFinancials(markets, activeMarket), [markets, activeMarket]);
   
+
+const getPercentile = (arr, p) => arr && arr.length > 0 ? arr[Math.floor(arr.length * p)] : 0;
+const getMean = (arr) => arr && arr.length > 0 ? arr.reduce((a,b)=>a+b,0)/arr.length : 0;
+
+  const runMonteCarlo = () => {
+    setMcIsRunning(true);
+    // run async to not block UI
+    setTimeout(() => {
+      const npvArr = [];
+      const irrArr = [];
+      const roiArr = [];
+      const totalRoiArr = [];
+      const paybackArr = [];
+      const opProfitArr = [];
+      const netProfitArr = [];
+
+      // We use current settings
+      const mods = sensitivityMods[activeMarket === 'Consolidated' ? 'Portugal' : activeMarket as 'Portugal'|'UK'];
+      
+      const randNormal = () => {
+        let u = 0, v = 0;
+        while(u === 0) u = Math.random(); //Converting [0,1) to (0,1)
+        while(v === 0) v = Math.random();
+        return Math.sqrt( -2.0 * Math.log( u ) ) * Math.cos( 2.0 * Math.PI * v );
+      };
+
+      for(let i = 0; i < mcIterations; i++) {
+        // Uniform distribution: baseMod + variance
+        // Let's assume the current mods are the base, and we add a uniform variance +/- 10%
+        // Actually, let's use a standard distribution logic. We can use randNormal for a better distribution, with stdDev = 15% of the base value.
+        // Wait, for absolute values like subscription fee, +/- 10% might mean something else.
+        // Let's do simple uniform variance between -20% and +20% of the mod's absolute scale, or just let's do random normal around the mod value.
+        // To be safe, let's apply a +/- 15% variation on the sensitivity mod range or base value.
+        
+        // Simpler: random uniform between 0.8 and 1.2 for all inputs.
+        // But the modifiers are additive absolute values (like commission + 2, ownerChurn + 5).
+        // Let's just create a randomized mod object:
+        const r = () => (Math.random() * 2 - 1); // -1 to 1
+
+        const rMod = {
+          newOwners: mods.newOwners + r() * 20, // +/- 20
+          newProviders: mods.newProviders + r() * 20,
+          ownerChurn: [0,0,0,0,0].map(() => mods.ownerChurn[0] + r() * 5),
+          providerChurn: [0,0,0,0,0].map(() => mods.providerChurn[0] + r() * 5),
+          avgPricePerBooking: mods.avgPricePerBooking + r() * 5,
+          commission: mods.commission + r() * 2,
+          subscriptionFee: mods.subscriptionFee + r() * 5,
+          yearlyBookings: mods.yearlyBookings + r() * 1,
+          unitCustomerSupportCostOwners: [0,0,0,0,0].map(() => (mods.unitCustomerSupportCostOwners?.[0] || 0) + r() * 2),
+          itRnD: mods.itRnD + r() * 10,
+          marketing: mods.marketing + r() * 10
+        };
+
+        const result = computeAllFinancials(markets, activeMarket, 
+          activeMarket === 'Portugal' || activeMarket === 'Consolidated' ? rMod : undefined,
+          activeMarket === 'UK' || activeMarket === 'Consolidated' ? rMod : undefined,
+          sensitivityMods.wacc + r() * 2
+        );
+
+        npvArr.push(result.npv);
+        irrArr.push(result.irr || 0);
+        roiArr.push(result.roi || 0);
+        totalRoiArr.push(result.totalRoi || 0);
+        paybackArr.push(result.paybackPeriod || 0);
+        opProfitArr.push(result.operatingProfit);
+        netProfitArr.push(result.totalNetIncome);
+      }
+
+      setMcResults({
+        npv: npvArr.sort((a,b)=>a-b),
+        irr: irrArr.sort((a,b)=>a-b),
+        roi: roiArr.sort((a,b)=>a-b),
+        totalRoi: totalRoiArr.sort((a,b)=>a-b),
+        payback: paybackArr.sort((a,b)=>a-b),
+        opProfit: opProfitArr.sort((a,b)=>a-b),
+        netProfit: netProfitArr.sort((a,b)=>a-b)
+      });
+      setMcIsRunning(false);
+    }, 50);
+  };
+
   const getBasePlatformMetric = (name: string, yearIdx?: number) => {
     let yIdx = yearIdx;
     if (yIdx === undefined) {
@@ -379,6 +474,7 @@ export default function App() {
       platformMetricsStreams = applyMod(platformMetricsStreams, '% of bookings commission', mods.commission, 'absolute');
       platformMetricsStreams = applyMod(platformMetricsStreams, 'Monthly Subscription fee', mods.subscriptionFee, 'absolute');
       platformMetricsStreams = applyMod(platformMetricsStreams, '# of yearly bookings per pet owners', mods.yearlyBookings, 'absolute');
+      platformMetricsStreams = applyMod(platformMetricsStreams, 'Unit Customer Support cost - Owners', mods.unitCustomerSupportCostOwners, 'absoluteArray');
       fixedCostsStreams = applyMod(fixedCostsStreams, 'IT R&D and Support', mods.itRnD, 'relative');
       fixedCostsStreams = applyMod(fixedCostsStreams, 'Advertisement & Promotion', mods.marketing, 'relative');
     }
@@ -549,9 +645,9 @@ export default function App() {
       
       const bookingVolume = owners * bookingsPerOwner * avgPrice;
       
-      const subscriptionsRevenue = derivedRevenueStreams.find(s => s.name === 'Monthly Subscriptions')?.amounts?.[y] || 0;
+      const subscriptionsRevenue = derivedRevenueStreams.find(s => s.id === 'rev-1' || s.name === 'Monthly Subscriptions')?.amounts?.[y] || 0;
       const otherRevenue = derivedRevenueStreams
-        .filter(s => s.name !== 'Monthly Subscriptions' && s.name !== 'Booking Fees')
+        .filter(s => !(s.id === 'rev-1' || s.name === 'Monthly Subscriptions') && !(s.id === 'rev-2' || s.name === 'Booking Fees'))
         .reduce((sum, s) => sum + (Number(s.amounts[y]) || 0), 0);
         
       return bookingVolume + Number(subscriptionsRevenue) + otherRevenue;
@@ -628,7 +724,7 @@ export default function App() {
         equityInjection[0] = 600000;
         equityInjection[1] = 500000;
     } else if (marketName === 'UK') {
-        equityInjection[2] = 1600000;
+        equityInjection[2] = 1800000;
     }
 
     let accumulatedLoss = 0;
@@ -663,8 +759,8 @@ export default function App() {
     const totalTaxes = taxByYear.reduce((a, b) => a + b, 0);
     const totalNetIncome = netIncomeByYear.reduce((a, b) => a + b, 0);
 
-    const defRevBalance = years.map(y => totalRevenueByYear[y] * 0.01);
-    const accruedFeesBalance = years.map(y => totalRevenueByYear[y] * 0.03);
+    const defRevBalance = years.map(y => totalGrossRevenueByYear[y] * 0.01);
+    const accruedFeesBalance = years.map(y => totalGrossRevenueByYear[y] * 0.03);
 
     const increaseDefRev: number[] = [];
     const increaseAccruedFees: number[] = [];
@@ -755,7 +851,8 @@ export default function App() {
     const calculatedNetIncomePercent = totalRevenue > 0 ? (totalNetIncome / totalRevenue) * 100 : 0;
 
     const totalInvestment = equityInjection.reduce((a, b) => a + b, 0);
-    const roi = totalInvestment > 0 ? totalNetIncome / totalInvestment : 0;
+    const roi = totalInvestment > 0 ? ((totalNetIncome / 5) / totalInvestment) : 0;
+    const totalRoi = totalInvestment > 0 ? (totalNetIncome / totalInvestment) : 0;
 
     return {
       equityInjection,
@@ -802,13 +899,90 @@ export default function App() {
       npv,
       irr,
       roi,
+      totalRoi,
       paybackPeriod,
       discountedPaybackPeriod
     };
   };
 
+  
+  useEffect(() => {
+    if (activeMarket !== 'Consolidated') return;
+    const base = computeAllFinancials(markets, 'Consolidated', undefined, undefined, 0);
+
+    function testScenario(modName, modValue, waccMod = 0) {
+      const mods = {
+        newOwners: 0,
+        newProviders: 0,
+        ownerChurn: [0, 0, 0, 0, 0],
+        providerChurn: [0, 0, 0, 0, 0],
+        avgPricePerBooking: 0,
+        commission: 0,
+        subscriptionFee: 0,
+        yearlyBookings: 0,
+        unitCustomerSupportCostOwners: [0, 0, 0, 0, 0],
+        itRnD: 0,
+        marketing: 0
+      };
+      
+      if (modName !== 'wacc') {
+        if (modName === 'ownerChurn' || modName === 'providerChurn' || modName === 'unitCustomerSupportCostOwners') {
+          mods[modName] = [modValue, modValue, modValue, modValue, modValue];
+        } else {
+          mods[modName] = modValue;
+        }
+      }
+
+      const result = computeAllFinancials(markets, 'Consolidated', mods, mods, waccMod);
+      return {
+        opProfit: result.operatingProfit - base.operatingProfit,
+        netProfit: result.totalNetIncome - base.totalNetIncome,
+        npv: result.npv - base.npv,
+        irr: (result.irr || 0) - (base.irr || 0),
+        roi: (result.roi || 0) - (base.roi || 0),
+        totalRoi: (result.totalRoi || 0) - (base.totalRoi || 0),
+        payback: (result.paybackPeriod || 0) - (base.paybackPeriod || 0),
+      };
+    }
+
+    const scenarios = [
+      { name: 'New Owners +10%', mod: 'newOwners', val: 10 },
+      { name: 'New Providers +10%', mod: 'newProviders', val: 10 },
+      { name: 'Owner Churn +5%', mod: 'ownerChurn', val: 5 },
+      { name: 'Provider Churn +5%', mod: 'providerChurn', val: 5 },
+      { name: 'Avg Price +5 (abs)', mod: 'avgPricePerBooking', val: 5 },
+      { name: 'Commission +2% (abs)', mod: 'commission', val: 2 },
+      { name: 'Subscription Fee +5 (abs)', mod: 'subscriptionFee', val: 5 },
+      { name: 'Yearly Bookings +1 (abs)', mod: 'yearlyBookings', val: 1 },
+      { name: 'Unit CS Owners +1 (abs)', mod: 'unitCustomerSupportCostOwners', val: 1 },
+      { name: 'IT R&D +10%', mod: 'itRnD', val: 10 },
+      { name: 'Marketing +10%', mod: 'marketing', val: 10 },
+      { name: 'WACC +2%', mod: 'wacc', val: 0, wacc: 2 },
+    ];
+
+    let out = "Baseline:\n";
+    out += "OpProfit: " + base.operatingProfit + "\n";
+    out += "NetProfit: " + base.totalNetIncome + "\n";
+    out += "NPV: " + base.npv + "\n";
+    out += "IRR: " + base.irr + "\n";
+    out += "Average Annual ROI: " + base.roi + "\n";
+    out += "Payback: " + base.paybackPeriod + "\n\nImpacts:\n";
+    
+    for (const s of scenarios) {
+      const res = testScenario(s.mod, s.val, s.wacc || 0);
+      out += s.name + "\n";
+      out += "  OpProfit: " + Math.round(res.opProfit) + "\n";
+      out += "  NetProfit: " + Math.round(res.netProfit) + "\n";
+      out += "  NPV: " + Math.round(res.npv) + "\n";
+      out += "  IRR: " + (res.irr * 100).toFixed(2) + "%\n";
+      out += "  Average Annual ROI: " + (res.roi * 100).toFixed(2) + "%\n";
+      out += "  Payback: " + res.payback.toFixed(2) + "\n";
+    }
+    fetch("http://localhost:3001", { method: "POST", body: out }).catch(e=>console.log(e));
+  }, [markets, activeMarket]);
+
   const updateMarketData = (updater: (prev: MarketData) => MarketData) => {
-    if (activeMarket === 'Aggregated') return;
+    if (activeMarket === 'Consolidated') return;
     setMarkets(prev => ({
       ...prev,
       [activeMarket]: updater(prev[activeMarket])
@@ -836,10 +1010,10 @@ export default function App() {
     uk.fixedCostsStreams = fillEmptyWithY3(uk.fixedCostsStreams);
     // Note: boolean arrays chargeSubscription and chargeBookingFees don't have "empty" states, they are false by default.
     
-    const marketsFilled = { Portugal: pt, UK: uk, Aggregated: undefined };
+    const marketsFilled = { Portugal: pt, UK: uk, Consolidated: undefined };
 
 
-    if (activeMarket === 'Aggregated') {
+    if (activeMarket === 'Consolidated') {
       const pt = marketsFilled.Portugal;
       const uk = marketsFilled.UK;
       const ptFin = { ...pt, ...calculateFinancials(pt, 'Portugal', modsPt, waccMod) };
@@ -894,6 +1068,7 @@ export default function App() {
           netIncreaseInCash: convertArr(fin.netIncreaseInCash),
           cashBalanceBeginning: convertArr(fin.cashBalanceBeginning),
           cashBalanceEnd: convertArr(fin.cashBalanceEnd),
+          equityInjection: convertArr(fin.equityInjection),
           shareCapital: convertArr(fin.shareCapital),
           retainedEarnings: convertArr(fin.retainedEarnings),
           totalEquity: convertArr(fin.totalEquity),
@@ -906,7 +1081,8 @@ export default function App() {
           grossMargin: convertArr(fin.grossMarginByYear).reduce((a,b)=>a+b,0),
           operatingProfit: convertArr(fin.opProfitByYear).reduce((a,b)=>a+b,0),
           totalTaxes: convertArr(fin.taxByYear).reduce((a,b)=>a+b,0),
-          totalNetIncome: convertArr(fin.netIncomeByYear).reduce((a,b)=>a+b,0)
+          totalNetIncome: convertArr(fin.netIncomeByYear).reduce((a,b)=>a+b,0),
+          totalInvestment: convertArr(fin.equityInjection).reduce((a,b)=>a+b,0)
         };
       };
 
@@ -1019,42 +1195,14 @@ export default function App() {
       const grossMarginPercentByYear = years.map(y => totalRevenueByYear[y] > 0 ? (grossMarginByYear[y] / totalRevenueByYear[y]) * 100 : 0);
       const opProfitPercentByYear = years.map(y => totalRevenueByYear[y] > 0 ? (opProfitByYear[y] / totalRevenueByYear[y]) * 100 : 0);
 
-    const TAX_RATE = 0.21;
-
-    let accumulatedLoss = 0;
-    const netIncomeByYear: number[] = [];
-    const taxByYear: number[] = [];
-
-    for (let i = 0; i < 5; i++) {
-        const ebit = opProfitByYear[i];
-        if (ebit < 0) {
-            taxByYear[i] = 0;
-            accumulatedLoss += Math.abs(ebit);
-            netIncomeByYear[i] = ebit;
-        } else {
-            let taxableIncome = 0;
-            if (accumulatedLoss > 0) {
-                if (ebit <= accumulatedLoss) {
-                    taxableIncome = 0;
-                    accumulatedLoss -= ebit;
-                } else {
-                    taxableIncome = ebit - accumulatedLoss;
-                    accumulatedLoss = 0;
-                }
-            } else {
-                taxableIncome = ebit;
-            }
-            const tax = taxableIncome * TAX_RATE;
-            taxByYear[i] = tax;
-            netIncomeByYear[i] = ebit - tax;
-        }
-    }
+    const taxByYear: number[] = years.map(i => ptFin.taxByYear[i] + ukFin.taxByYear[i]);
+    const netIncomeByYear: number[] = years.map(i => ptFin.netIncomeByYear[i] + ukFin.netIncomeByYear[i]);
 
     const totalTaxes = taxByYear.reduce((a, b) => a + b, 0);
     const totalNetIncome = netIncomeByYear.reduce((a, b) => a + b, 0);
 
-    const defRevBalance = years.map(y => totalRevenueByYear[y] * 0.01);
-    const accruedFeesBalance = years.map(y => totalRevenueByYear[y] * 0.03);
+    const defRevBalance = years.map(y => totalGrossRevenueByYear[y] * 0.01);
+    const accruedFeesBalance = years.map(y => totalGrossRevenueByYear[y] * 0.03);
 
     const increaseDefRev: number[] = [];
     const increaseAccruedFees: number[] = [];
@@ -1138,7 +1286,8 @@ export default function App() {
     const calculatedNetIncomePercent = totalRevenue > 0 ? (totalNetIncome / totalRevenue) * 100 : 0;
 
       const totalInvestment = ptFin.equityInjection.reduce((a, b) => a + b, 0) + ukFin.equityInjection.reduce((a, b) => a + b, 0);
-      const roi = totalInvestment > 0 ? totalNetIncome / totalInvestment : 0;
+      const roi = totalInvestment > 0 ? ((totalNetIncome / 5) / totalInvestment) : 0;
+    const totalRoi = totalInvestment > 0 ? (totalNetIncome / totalInvestment) : 0;
 
       return {
         platformMetricsStreams: aggregateStreams(ptFin.platformMetricsStreams, ukFin.platformMetricsStreams, true),
@@ -1189,6 +1338,7 @@ export default function App() {
         npv,
         irr,
         roi,
+        totalRoi,
         paybackPeriod,
         discountedPaybackPeriod
       };
@@ -1241,6 +1391,7 @@ export default function App() {
     totalRevenue,
     totalGrossRevenue,
     totalVariableCosts,
+    totalInvestment,
     fixedCosts,
     totalPlatformMetrics,
     grossMargin,
@@ -1253,10 +1404,113 @@ export default function App() {
     npv,
     irr,
     roi,
+    totalRoi,
     paybackPeriod,
     discountedPaybackPeriod
   } = React.useMemo(() => computeAllFinancials(markets, activeMarket), [activeMarket, markets]);
 
+
+  
+  const { providerCAC, ownerCAC, blendedCAC, providerCLV, ownerCLV, blendedCLV, clvCacRatio } = React.useMemo(() => {
+    const getStream = (arr, id, name) => arr.find(s => s.id === id || s.name === name)?.amounts || [0,0,0,0,0];
+    
+    const newProviders = getStream(platformMetricsStreams, 'pm-new-providers', 'New providers added');
+    const newOwners = getStream(platformMetricsStreams, 'pm-new-owners', 'New owners added');
+    const mktgSpend = getStream(derivedFixedCostsStreams, 'fc-3', 'Advertisement & Promotion');
+    const varCac = getStream(derivedVariableCostsStreams, 'vc-3', 'Customer acquisition costs');
+    
+    let totalAcqCost = 0;
+    let totalNewP = 0;
+    let totalNewO = 0;
+    
+    for (let i = 0; i < 5; i++) {
+      totalAcqCost += (Number(mktgSpend[i]) || 0) + (Number(varCac[i]) || 0);
+      totalNewP += Number(newProviders[i]) || 0;
+      totalNewO += Number(newOwners[i]) || 0;
+    }
+    
+    const blendedCAC = (totalNewP + totalNewO) > 0 ? totalAcqCost / (totalNewP + totalNewO) : 0;
+    
+    const unitCacP = getStream(platformMetricsStreams, 'pm-cac-providers', 'Unit CAC - Providers');
+    const unitCacO = getStream(platformMetricsStreams, 'pm-cac-owners', 'Unit CAC - Owners');
+    
+    let totalVarCacP = 0;
+    let totalVarCacO = 0;
+    for (let i = 0; i < 5; i++) {
+      totalVarCacP += (Number(newProviders[i]) || 0) * (Number(unitCacP[i]) || 0);
+      totalVarCacO += (Number(newOwners[i]) || 0) * (Number(unitCacO[i]) || 0);
+    }
+    
+    const totalNewUsers = totalNewP + totalNewO;
+    const totalMktgSpend = mktgSpend.reduce((a,b)=>a+(Number(b)||0),0);
+    
+    // Allocate fixed marketing spend proportionally to the number of acquired users
+    const providerMktgSpend = totalNewUsers > 0 ? totalMktgSpend * (totalNewP / totalNewUsers) : totalMktgSpend * 0.5;
+    const ownerMktgSpend = totalNewUsers > 0 ? totalMktgSpend * (totalNewO / totalNewUsers) : totalMktgSpend * 0.5;
+
+    const actualProviderCAC = totalNewP > 0 ? (totalVarCacP + providerMktgSpend) / totalNewP : 0;
+    const actualOwnerCAC = totalNewO > 0 ? (totalVarCacO + ownerMktgSpend) / totalNewO : 0;
+
+    const subRev = getStream(derivedRevenueStreams, 'rev-1', 'Monthly Subscriptions');
+    const bookRev = getStream(derivedRevenueStreams, 'rev-2', 'Booking Fees');
+    
+    const totalSubRev = subRev.reduce((a,b)=>a+(Number(b)||0),0);
+    const totalBookRev = bookRev.reduce((a,b)=>a+(Number(b)||0),0);
+    
+    const paymentProc = getStream(derivedVariableCostsStreams, 'vc-1', 'Payment Processing');
+    const custSupport = getStream(derivedVariableCostsStreams, 'vc-2', 'Customer Support');
+    const serverCost = getStream(derivedVariableCostsStreams, 'vc-4', 'Server/Hosting (AWS/GCP)');
+    
+    const totalVarCostsNoCac = paymentProc.reduce((a,b)=>a+(Number(b)||0),0) + 
+                               custSupport.reduce((a,b)=>a+(Number(b)||0),0) + 
+                               serverCost.reduce((a,b)=>a+(Number(b)||0),0);
+                               
+    const revShareProvider = (totalSubRev + totalBookRev) > 0 ? totalSubRev / (totalSubRev + totalBookRev) : 0.5;
+    const revShareOwner = (totalSubRev + totalBookRev) > 0 ? totalBookRev / (totalSubRev + totalBookRev) : 0.5;
+    
+    const providerGrossMargin = totalSubRev - (totalVarCostsNoCac * revShareProvider);
+    const ownerGrossMargin = totalBookRev - (totalVarCostsNoCac * revShareOwner);
+    
+    const activeProvidersArr = getStream(platformMetricsStreams, 'pm-1', 'Number of providers in the platform');
+    const activeOwnersArr = getStream(platformMetricsStreams, 'pm-2', 'Number of owners in the platform');
+    const totalActiveProviders = activeProvidersArr.reduce((a,b)=>a+(Number(b)||0),0);
+    const totalActiveOwners = activeOwnersArr.reduce((a,b)=>a+(Number(b)||0),0);
+    
+    const gmPerProviderPerYear = totalActiveProviders > 0 ? providerGrossMargin / totalActiveProviders : 0;
+    const gmPerOwnerPerYear = totalActiveOwners > 0 ? ownerGrossMargin / totalActiveOwners : 0;
+    
+    const providerChurn = getStream(platformMetricsStreams, 'pm-churn-providers', 'Provider churn rate (%)');
+    const ownerChurn = getStream(platformMetricsStreams, 'pm-churn-owners', 'Owner churn rate (%)');
+    
+    // Weight churn rates by active users each year
+    let weightedProviderChurnSum = 0;
+    let weightedOwnerChurnSum = 0;
+    for (let i = 0; i < 5; i++) {
+        weightedProviderChurnSum += (Number(providerChurn[i]) || 0) * (Number(activeProvidersArr[i]) || 0);
+        weightedOwnerChurnSum += (Number(ownerChurn[i]) || 0) * (Number(activeOwnersArr[i]) || 0);
+    }
+    const avgProviderChurn = totalActiveProviders > 0 ? (weightedProviderChurnSum / totalActiveProviders) / 100 : 0.2;
+    const avgOwnerChurn = totalActiveOwners > 0 ? (weightedOwnerChurnSum / totalActiveOwners) / 100 : 0.2;
+    
+    const providerLifetime = avgProviderChurn > 0 ? 1 / avgProviderChurn : 0;
+    const ownerLifetime = avgOwnerChurn > 0 ? 1 / avgOwnerChurn : 0;
+    
+    const providerCLV = gmPerProviderPerYear * providerLifetime;
+    const ownerCLV = gmPerOwnerPerYear * ownerLifetime;
+    
+    // Weight blended CLV by new acquisitions since it reflects the value of acquiring a new user
+    const blendedCLV = totalNewUsers > 0 ? ((providerCLV * totalNewP) + (ownerCLV * totalNewO)) / totalNewUsers : 0;
+
+    return { 
+      providerCAC: actualProviderCAC, 
+      ownerCAC: actualOwnerCAC, 
+      blendedCAC, 
+      providerCLV, 
+      ownerCLV, 
+      blendedCLV,
+      clvCacRatio: blendedCAC > 0 ? blendedCLV / blendedCAC : 0
+    };
+  }, [platformMetricsStreams, derivedFixedCostsStreams, derivedVariableCostsStreams, derivedRevenueStreams]);
 
   const getBookingsTotal = (marketCode: 'Portugal' | 'UK', adjustedDerived?: any) => {
     const derived = adjustedDerived ? adjustedDerived : calculateFinancials(markets[marketCode], marketCode);
@@ -1276,8 +1530,8 @@ export default function App() {
     // We can run calculateFinancials directly for each market if we want,
     // or just rely on the fact that aggregated doesn't have ptBookings easily accessible in 'adjusted'.
     // Actually, let's just do:
-    const ptAdj = activeMarket === 'Aggregated' ? calculateFinancials(markets.Portugal, 'Portugal', sensitivityMods) : (activeMarket === 'Portugal' ? adjusted : null);
-    const ukAdj = activeMarket === 'Aggregated' ? calculateFinancials(markets.UK, 'UK', sensitivityMods) : (activeMarket === 'UK' ? adjusted : null);
+    const ptAdj = activeMarket === 'Consolidated' ? calculateFinancials(markets.Portugal, 'Portugal', sensitivityMods) : (activeMarket === 'Portugal' ? adjusted : null);
+    const ukAdj = activeMarket === 'Consolidated' ? calculateFinancials(markets.UK, 'UK', sensitivityMods) : (activeMarket === 'UK' ? adjusted : null);
 
     return { 
       data: {
@@ -1302,6 +1556,7 @@ export default function App() {
         npv: adjusted.npv,
         irr: adjusted.irr,
         roi: adjusted.roi,
+        totalRoi: adjusted.totalRoi,
         paybackPeriod: adjusted.paybackPeriod,
         discountedPaybackPeriod: adjusted.discountedPaybackPeriod
       },
@@ -1322,7 +1577,7 @@ export default function App() {
   };
 
   const addStream = (streams: FinancialStream[], prefix: string, key: keyof MarketData) => {
-    if (activeMarket === 'Aggregated') return;
+    if (activeMarket === 'Consolidated') return;
     const sectionId = prefix.toLowerCase().replace(/\s+/g, '-');
     const newStream = { id: `${sectionId}-${Date.now()}`, name: `${prefix} ${streams.length + 1}`, amounts: ['', '', '', '', ''] };
     updateMarketData(prev => ({
@@ -1332,7 +1587,7 @@ export default function App() {
   };
 
   const updateStreamName = (streams: FinancialStream[], id: string, name: string, key: keyof MarketData) => {
-    if (activeMarket === 'Aggregated') return;
+    if (activeMarket === 'Consolidated') return;
     updateMarketData(prev => ({
       ...prev,
       [key]: (prev[key] as FinancialStream[]).map(stream => stream.id === id ? { ...stream, name } : stream)
@@ -1340,7 +1595,7 @@ export default function App() {
   };
 
   const updateStreamAmount = (streams: FinancialStream[], id: string, yearIndex: number, value: number | '', key: keyof MarketData) => {
-    if (activeMarket === 'Aggregated') return;
+    if (activeMarket === 'Consolidated') return;
     updateMarketData(prev => ({
       ...prev,
       [key]: (prev[key] as FinancialStream[]).map(stream => {
@@ -1355,7 +1610,7 @@ export default function App() {
   };
 
   const removeStream = (streams: FinancialStream[], id: string, key: keyof MarketData) => {
-    if (activeMarket === 'Aggregated') return;
+    if (activeMarket === 'Consolidated') return;
     updateMarketData(prev => ({
       ...prev,
       [key]: (prev[key] as FinancialStream[]).filter(stream => stream.id !== id)
@@ -1363,7 +1618,7 @@ export default function App() {
   };
 
   const toggleCharge = (yearIndex: number, key: 'chargeSubscription' | 'chargeBookingFees') => {
-    if (activeMarket === 'Aggregated') return;
+    if (activeMarket === 'Consolidated') return;
     updateMarketData(prev => {
       const newVal = [...prev[key]];
       newVal[yearIndex] = !newVal[yearIndex];
@@ -1418,13 +1673,13 @@ export default function App() {
     };
     return {
       name: `Year ${y + 1}`,
-      'New Providers': getVal('New providers added'),
-      'Total Providers': getVal('Number of providers in the platform'),
-      'Provider Churn': getVal('Provider churn rate (%)'),
-      'New Owners': getVal('New owners added'),
-      'Total Owners': getVal('Number of owners in the platform'),
-      'Owner Churn': getVal('Owner churn rate (%)'),
-      'Number of Bookings': getVal('Number of owners in the platform') * getVal('# of yearly bookings per pet owners'),
+      'New Providers': getVal('New providers added') === 0 ? null : getVal('New providers added'),
+      'Total Providers': getVal('Number of providers in the platform') === 0 ? null : getVal('Number of providers in the platform'),
+      'Provider Churn': getVal('Provider churn rate (%)') === 0 ? null : getVal('Provider churn rate (%)'),
+      'New Owners': getVal('New owners added') === 0 ? null : getVal('New owners added'),
+      'Total Owners': getVal('Number of owners in the platform') === 0 ? null : getVal('Number of owners in the platform'),
+      'Owner Churn': getVal('Owner churn rate (%)') === 0 ? null : getVal('Owner churn rate (%)'),
+      'Number of Bookings': (getVal('Number of owners in the platform') * getVal('# of yearly bookings per pet owners')) === 0 ? null : (getVal('Number of owners in the platform') * getVal('# of yearly bookings per pet owners')),
     };
   });
 
@@ -1532,7 +1787,7 @@ export default function App() {
     }
 
     const workbook = new ExcelJS.Workbook();
-    const marketsToExport: Market[] = ['Portugal', 'UK', 'Aggregated'];
+    const marketsToExport: Market[] = ['Portugal', 'UK', 'Consolidated'];
 
     const getColLetter = (col: number) => String.fromCharCode(65 + col);
     const getCellRef = (col: number, row: number | undefined) => {
@@ -1592,7 +1847,7 @@ export default function App() {
         metricRowMap[name] = currentRow;
         const rowData: any[] = ['Platform Metric', name];
         years.forEach(y => {
-          if (market === 'Aggregated') {
+          if (market === 'Consolidated') {
             const weightedMetrics = [
               '% of bookings commission',
               'Avg price per booking',
@@ -1763,7 +2018,7 @@ export default function App() {
       const ptSub = markets.Portugal.chargeSubscription;
       const ukSub = markets.UK.chargeSubscription;
       sheet.addRow(['Platform Setting', 'Charge Subscription', ...years.map(y => {
-        if (market === 'Aggregated') return { formula: `MAX('Portugal'!${getCellRef(2 + y, chargeSubRowIdx)}, 'UK'!${getCellRef(2 + y, chargeSubRowIdx)})` };
+        if (market === 'Consolidated') return { formula: `MAX('Portugal'!${getCellRef(2 + y, chargeSubRowIdx)}, 'UK'!${getCellRef(2 + y, chargeSubRowIdx)})` };
         return (market === 'Portugal' ? ptSub[y] : ukSub[y]) ? 1 : 0;
       })]); currentRow++;
       
@@ -1771,7 +2026,7 @@ export default function App() {
       const ptBook = markets.Portugal.chargeBookingFees;
       const ukBook = markets.UK.chargeBookingFees;
       sheet.addRow(['Platform Setting', 'Charge Booking Fees', ...years.map(y => {
-        if (market === 'Aggregated') return { formula: `MAX('Portugal'!${getCellRef(2 + y, chargeBookingRowIdx)}, 'UK'!${getCellRef(2 + y, chargeBookingRowIdx)})` };
+        if (market === 'Consolidated') return { formula: `MAX('Portugal'!${getCellRef(2 + y, chargeBookingRowIdx)}, 'UK'!${getCellRef(2 + y, chargeBookingRowIdx)})` };
         return (market === 'Portugal' ? ptBook[y] : ukBook[y]) ? 1 : 0;
       })]); currentRow++;
 
@@ -1796,15 +2051,16 @@ export default function App() {
       const revenueStartRowIdx = currentRow;
       revenueUnion.forEach(name => {
         const rowData: any[] = ['Revenue', name];
-        if (market === 'Aggregated') {
+        const streamId = ptFin.derivedRevenueStreams.find(s => s.name === name)?.id || ukFin.derivedRevenueStreams.find(s => s.name === name)?.id;
+        if (market === 'Consolidated') {
           years.forEach(y => {
             const col = getColLetter(2 + y);
             const getUkFxMulti = (c: string) => fxRateIdxInUnion >= 0 ? `'UK'!${c}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
             rowData.push({ formula: `'Portugal'!${col}${currentRow + 1} + ('UK'!${col}${currentRow + 1} * ${getUkFxMulti(col)})` });
           });
-        } else if (name === 'Monthly Subscriptions') {
+        } else if (streamId === 'rev-1' || name === 'Monthly Subscriptions') {
           years.forEach(y => rowData.push({ formula: `${getCellRef(2 + y, providersRow)}*${getCellRef(2 + y, subFeeRow)}*${getCellRef(2 + y, chargeSubRowIdx)}*12` }));
-        } else if (name === 'Booking Fees') {
+        } else if (streamId === 'rev-2' || name === 'Booking Fees') {
           const commissionRow = metricRowMap['% of bookings commission'];
           years.forEach(y => rowData.push({ formula: `${getCellRef(2 + y, ownersRow)}*${getCellRef(2 + y, bookingsPerOwnerRow)}*${getCellRef(2 + y, avgPriceRow)}*${getCellRef(2 + y, commissionRow)}*${getCellRef(2 + y, chargeBookingRowIdx)}` }));
         } else {
@@ -1832,7 +2088,7 @@ export default function App() {
       const cogsStartRowIdx = currentRow;
       cogsUnion.forEach(name => {
         const rowData: any[] = ['COGS', name];
-        if (market === 'Aggregated') {
+        if (market === 'Consolidated') {
           years.forEach(y => {
             const col = getColLetter(2 + y);
             const getUkFxMulti = (c: string) => fxRateIdxInUnion >= 0 ? `'UK'!${c}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
@@ -1895,7 +2151,7 @@ export default function App() {
       fixedUnion.forEach(name => {
         const rowData: any[] = ['Fixed Cost', name];
         years.forEach(y => {
-          if (market === 'Aggregated') {
+          if (market === 'Consolidated') {
             const col = getColLetter(2 + y);
             const getUkFxMulti = (c: string) => fxRateIdxInUnion >= 0 ? `'UK'!${c}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
             rowData.push({ formula: `'Portugal'!${col}${currentRow + 1} + ('UK'!${col}${currentRow + 1} * ${getUkFxMulti(col)})` });
@@ -1939,9 +2195,16 @@ export default function App() {
         'Summary',
         'Gross Revenues',
         ...years.map(y => {
-          const bfIndex = revenueUnion.indexOf('Booking Fees');
-          const bfRef = bfIndex >= 0 ? getCellRef(2 + y, revenueStartRowIdx + bfIndex) : '0';
-          return { formula: `${getCellRef(2 + y, revenueTotalRowIdx)}-${bfRef}+${getCellRef(2 + y, bookVolRowIdx)}` };
+          const bfNames = Array.from(new Set([
+            markets.Portugal.revenueStreams.find(s => s.id === 'rev-2')?.name,
+            markets.UK.revenueStreams.find(s => s.id === 'rev-2')?.name
+          ])).filter(Boolean) as string[];
+          const bfRefs = bfNames.map(name => {
+            const idx = revenueUnion.indexOf(name);
+            return idx >= 0 ? getCellRef(2 + y, revenueStartRowIdx + idx) : '0';
+          }).filter(ref => ref !== '0');
+          const bfRefStr = bfRefs.length > 0 ? bfRefs.join('-') : '0';
+          return { formula: `${getCellRef(2 + y, revenueTotalRowIdx)}-${bfRefStr}+${getCellRef(2 + y, bookVolRowIdx)}` };
         }),
         { formula: `SUM(C${currentRow + 1}:G${currentRow + 1})` }
       ]); currentRow++;
@@ -2023,7 +2286,7 @@ export default function App() {
         'Summary',
         'Accumulated Loss (Beginning)',
         ...years.map(y => {
-          if (market === 'Aggregated') {
+          if (market === 'Consolidated') {
             const col = getColLetter(2 + y);
             const getUkFxMulti = (c: string) => fxRateIdxInUnion >= 0 ? `'UK'!${c}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
             return { formula: `'Portugal'!${col}${currentRow + 1} + ('UK'!${col}${currentRow + 1} * ${getUkFxMulti(col)})` };
@@ -2039,7 +2302,7 @@ export default function App() {
         'Summary',
         'Taxable Income',
         ...years.map(y => {
-          if (market === 'Aggregated') {
+          if (market === 'Consolidated') {
             const col = getColLetter(2 + y);
             const getUkFxMulti = (c: string) => fxRateIdxInUnion >= 0 ? `'UK'!${c}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
             return { formula: `'Portugal'!${col}${currentRow + 1} + ('UK'!${col}${currentRow + 1} * ${getUkFxMulti(col)})` };
@@ -2054,7 +2317,7 @@ export default function App() {
         'Summary',
         'Accumulated Loss (Ending)',
         ...years.map(y => {
-          if (market === 'Aggregated') {
+          if (market === 'Consolidated') {
             const col = getColLetter(2 + y);
             const getUkFxMulti = (c: string) => fxRateIdxInUnion >= 0 ? `'UK'!${c}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
             return { formula: `'Portugal'!${col}${currentRow + 1} + ('UK'!${col}${currentRow + 1} * ${getUkFxMulti(col)})` };
@@ -2068,7 +2331,7 @@ export default function App() {
         'Summary',
         'Taxes',
         ...years.map(y => {
-          if (market === 'Aggregated') {
+          if (market === 'Consolidated') {
             const col = getColLetter(2 + y);
             const getUkFxMulti = (c: string) => fxRateIdxInUnion >= 0 ? `'UK'!${c}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
             return { formula: `'Portugal'!${col}${currentRow + 1} + ('UK'!${col}${currentRow + 1} * ${getUkFxMulti(col)})` };
@@ -2113,7 +2376,7 @@ export default function App() {
         ...years.map(y => (dynamicFeePerTxRowIdx !== undefined ? { formula: getCellRef(2 + y, dynamicFeePerTxRowIdx) } : 0.30))
       ]); currentRow++;
 
-      if (market === 'Aggregated') {
+      if (market === 'Consolidated') {
         sheet.addRow(['Breakdown', 'Subscription Volume', ...years.map(y => {
           const col = getColLetter(2 + y);
           const getUkFxMulti = (c: string) => fxRateIdxInUnion >= 0 ? `'UK'!${c}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
@@ -2124,7 +2387,7 @@ export default function App() {
       }
       currentRow++;
 
-      if (market === 'Aggregated') {
+      if (market === 'Consolidated') {
         sheet.addRow(['Breakdown', 'Booking Volume', ...years.map(y => {
           const col = getColLetter(2 + y);
           const getUkFxMulti = (c: string) => fxRateIdxInUnion >= 0 ? `'UK'!${c}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
@@ -2135,14 +2398,14 @@ export default function App() {
       }
       currentRow++;
 
-      if (market === 'Aggregated') {
+      if (market === 'Consolidated') {
         sheet.addRow(['Breakdown', 'Subscription Transactions', ...years.map(y => ({ formula: `'Portugal'!${getCellRef(2 + y, currentRow + 1)} + 'UK'!${getCellRef(2 + y, currentRow + 1)}` }))]);
       } else {
         sheet.addRow(['Breakdown', 'Subscription Transactions', ...years.map(y => ({ formula: `${getCellRef(2 + y, providersRow)}*12*${getCellRef(2 + y, chargeSubRowIdx)}` }))]);
       }
       currentRow++;
 
-      if (market === 'Aggregated') {
+      if (market === 'Consolidated') {
         sheet.addRow(['Breakdown', 'Booking Transactions', ...years.map(y => ({ formula: `'Portugal'!${getCellRef(2 + y, currentRow + 1)} + 'UK'!${getCellRef(2 + y, currentRow + 1)}` }))]);
       } else {
         sheet.addRow(['Breakdown', 'Booking Transactions', ...years.map(y => ({ formula: `${getCellRef(2 + y, ownersRow)}*${getCellRef(2 + y, bookingsPerOwnerRow)}` }))]);
@@ -2156,8 +2419,8 @@ export default function App() {
       sheet.getRow(currentRow).font = { bold: true };
       
       const cfOpRowIdx = currentRow;
-      const defRevRowIdx = cfOpRowIdx + 25;
-      const accFeeRowIdx = cfOpRowIdx + 26;
+      const defRevRowIdx = cfOpRowIdx + 26;
+      const accFeeRowIdx = cfOpRowIdx + 27;
       
       sheet.addRow([
         'Cash Flow',
@@ -2218,7 +2481,7 @@ export default function App() {
         'Cash Flow',
         '(+) Issuance of Share Capital (Equity)',
         ...years.map(y => {
-          if (market === 'Aggregated') {
+          if (market === 'Consolidated') {
             const col = getColLetter(2 + y);
             const getUkFxMulti = (c: string) => fxRateIdxInUnion >= 0 ? `'UK'!${c}${platformStartRowIdx + fxRateIdxInUnion + 1}` : "1";
             return { formula: `'Portugal'!${col}${currentRow + 1} + ('UK'!${col}${currentRow + 1} * ${getUkFxMulti(col)})` };
@@ -2229,7 +2492,7 @@ export default function App() {
             return 0;
           }
           if (market === 'UK') {
-            if (y === 2) return 1600000;
+            if (y === 2) return 1800000;
             return 0;
           }
           return 0;
@@ -2334,7 +2597,7 @@ export default function App() {
         'Deferred Revenue',
         ...years.map(y => {
           const col = getColLetter(2 + y);
-          return { formula: `IF(${col}${revenueTotalRowIdx + 1}=0,0,${col}${revenueTotalRowIdx + 1}*0.01)` };
+          return { formula: `IF(${col}${grossRevRowIdx + 1}=0,0,${col}${grossRevRowIdx + 1}*0.01)` };
         })
       ]); currentRow++;
 
@@ -2343,7 +2606,7 @@ export default function App() {
         'Accrued Provider Fees',
         ...years.map(y => {
           const col = getColLetter(2 + y);
-          return { formula: `IF(${col}${revenueTotalRowIdx + 1}=0,0,${col}${revenueTotalRowIdx + 1}*0.03)` };
+          return { formula: `IF(${col}${grossRevRowIdx + 1}=0,0,${col}${grossRevRowIdx + 1}*0.03)` };
         })
       ]); currentRow++;
 
@@ -2419,8 +2682,8 @@ export default function App() {
       sheet.getRow(currentRow).font = { bold: true };
       sheet.addRow([
         'Valuation',
-        'NPV (Adjusted)',
-        { formula: `NPV(0.173 * (1 + 'Sensitivity Analysis'!$B$7/100), C${netCfOpRowIdx + 1}:G${netCfOpRowIdx + 1})` }
+        'NPV',
+        { formula: `NPV(0.173, C${netCfOpRowIdx + 1}:G${netCfOpRowIdx + 1})` }
       ]);
       sheet.getRow(currentRow + 1).getCell(3).numFmt = '#,##0';
       currentRow++;
@@ -2469,7 +2732,7 @@ export default function App() {
     
     // Add Sensitivity Analysis Sheet
     const sensSheet = workbook.addWorksheet('Sensitivity Analysis');
-    const exportMods = activeMarket === 'Aggregated' ? sensitivityMods.Portugal : sensitivityMods[activeMarket as 'Portugal' | 'UK'];
+    const exportMods = activeMarket === 'Consolidated' ? sensitivityMods.Portugal : sensitivityMods[activeMarket as 'Portugal' | 'UK'];
     const currentMods = exportMods; // alias for the sheet rows
 
     sensSheet.getColumn(1).width = 25;
@@ -2500,6 +2763,7 @@ export default function App() {
     
     sensSheet.addRow(['Owner Churn Rate (%)', ...years.map(y => baseOwnerChurn[y] + ((currentMods?.ownerChurn && currentMods?.ownerChurn[y]) || 0))]);
     sensSheet.addRow(['Provider Churn Rate (%)', ...years.map(y => baseProviderChurn[y] + ((currentMods?.providerChurn && currentMods?.providerChurn[y]) || 0))]);
+    sensSheet.addRow(['Unit Customer Support cost - Owners', ...years.map(y => getBasePlatformMetric('Unit Customer Support cost - Owners', y) + ((currentMods?.unitCustomerSupportCostOwners && currentMods?.unitCustomerSupportCostOwners[y]) || 0))]);
     sensSheet.addRow([]);
     
     sensSheet.addRow(['Absolute Overrides (Constant)', 'Value']);
@@ -2508,6 +2772,7 @@ export default function App() {
     sensSheet.addRow(['% of Bookings Commission', (getBasePlatformMetric('% of bookings commission') + (currentMods?.commission || 0))]);
     sensSheet.addRow(['Monthly Subscription Fee', getBasePlatformMetric('Monthly Subscription fee') + (currentMods?.subscriptionFee || 0)]);
     sensSheet.addRow(['# of yearly bookings per pet owners', getBasePlatformMetric('# of yearly bookings per pet owners') + (currentMods?.yearlyBookings || 0)]);
+
     sensSheet.addRow([]);
 
     // Add Financial Highlights
@@ -2515,7 +2780,8 @@ export default function App() {
     sensSheet.getRow(sensSheet.lastRow.number).font = { bold: true, size: 11, color: { argb: 'FF475569' } };
     sensSheet.addRow(['NPV', sensitivityData.metrics.npv]);
     sensSheet.addRow(['IRR (%)', sensitivityData.metrics.irr !== null ? sensitivityData.metrics.irr * 100 : 'N/A']);
-    sensSheet.addRow(['ROI (%)', sensitivityData.metrics.roi * 100]);
+    sensSheet.addRow(['Average Annual ROI (%)', sensitivityData.metrics.roi * 100]);
+    sensSheet.addRow(['Total ROI (%)', sensitivityData.metrics.totalRoi * 100]);
     sensSheet.addRow(['Payback Period (Years)', sensitivityData.metrics.paybackPeriod !== null ? sensitivityData.metrics.paybackPeriod : '> 5']);
     sensSheet.addRow(['Discounted Payback Period (Years)', sensitivityData.metrics.discountedPaybackPeriod !== null ? sensitivityData.metrics.discountedPaybackPeriod : '> 5']);
     sensSheet.addRow([]);
@@ -2558,7 +2824,7 @@ export default function App() {
     chartsSheet.getRow(1).height = 30;
 
     const instructions = [
-      '1. Click on any data sheet tab (e.g., "Portugal", "UK", or "Aggregated").',
+      '1. Click on any data sheet tab (e.g., "Portugal", "UK", or "Consolidated").',
       '2. Select the numerical range or table rows you want to graph (e.g., Year 1 to Year 5 values, including the category headers).',
       '3. MS Excel: Select the "Insert" tab at the top -> click "Recommended Charts" or choose Bar/Line chart.',
       '4. Google Sheets: Go to the "Insert" menu -> click "Chart".',
@@ -2643,7 +2909,7 @@ export default function App() {
     sectionRef?: React.RefObject<HTMLDivElement>,
     downloadId?: string
   ) => {
-    const isReadOnly = activeMarket === 'Aggregated';
+    const isReadOnly = activeMarket === 'Consolidated';
 
     const getValidationError = (streamName: string, val: number | string): string | null => {
       if (val === '') return null;
@@ -2882,7 +3148,7 @@ export default function App() {
           </div>
           <div className="flex items-center space-x-3">
             <div className="flex bg-white p-1 rounded-xl border border-slate-200 shadow-sm mr-4">
-              {(['Portugal', 'UK', 'Aggregated'] as Market[]).map((m) => (
+              {(['Portugal', 'UK', 'Consolidated'] as Market[]).map((m) => (
                 <button
                   key={m}
                   onClick={() => setActiveMarket(m)}
@@ -2984,7 +3250,19 @@ export default function App() {
           >
             Financial Highlights
           </button>
+
+          <button
+            onClick={() => setActiveTab('monte-carlo')}
+            className={`pb-4 px-2 text-sm font-medium transition-colors border-b-2 ${
+              activeTab === 'monte-carlo'
+                ? 'border-indigo-600 text-indigo-600'
+                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+            }`}
+          >
+            Monte Carlo
+          </button>
         </div>
+
 
         <div className={activeTab === 'financials' ? 'block' : 'opacity-0 pointer-events-none absolute -z-10 w-full'}>
           <div className="space-y-8">
@@ -3599,12 +3877,12 @@ export default function App() {
                             <span className="text-[10px] font-medium text-slate-500 uppercase">Y{y+1}</span>
                             <button
                               onClick={() => toggleCharge(y, 'chargeSubscription')}
-                              disabled={activeMarket === 'Aggregated'}
+                              disabled={activeMarket === 'Consolidated'}
                               className={`w-full py-1.5 text-xs font-medium rounded-md transition-colors ${
                                 chargeSubscription[y] 
                                   ? 'bg-indigo-600 text-white shadow-sm' 
                                   : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-                              } ${activeMarket === 'Aggregated' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                              } ${activeMarket === 'Consolidated' ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
                               {chargeSubscription[y] ? 'Yes' : 'No'}
                             </button>
@@ -3624,12 +3902,12 @@ export default function App() {
                             <span className="text-[10px] font-medium text-slate-500 uppercase">Y{y+1}</span>
                             <button
                               onClick={() => toggleCharge(y, 'chargeBookingFees')}
-                              disabled={activeMarket === 'Aggregated'}
+                              disabled={activeMarket === 'Consolidated'}
                               className={`w-full py-1.5 text-xs font-medium rounded-md transition-colors ${
                                 chargeBookingFees[y] 
                                   ? 'bg-indigo-600 text-white shadow-sm' 
                                   : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-                              } ${activeMarket === 'Aggregated' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                              } ${activeMarket === 'Consolidated' ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
                               {chargeBookingFees[y] ? 'Yes' : 'No'}
                             </button>
@@ -3667,7 +3945,7 @@ export default function App() {
                   </div>
                   <div className="h-80 w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={platformChartData}>
+                      <LineChart data={platformChartData} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
                         <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
@@ -3675,8 +3953,8 @@ export default function App() {
                           contentStyle={{ borderRadius: '0.75rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                         />
                         <Legend verticalAlign="top" height={36}/>
-                        <Line type="monotone" dataKey="Total Providers" stroke="#0ea5e9" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                        <Line type="monotone" dataKey="New Providers" stroke="#7dd3fc" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
+                        <Line type="monotone" dataKey="Total Providers" stroke="#0ea5e9" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} label={{ position: 'top', fill: '#0ea5e9', fontSize: 12, fontWeight: 500, formatter: (val: any) => val != null ? new Intl.NumberFormat('en-US').format(Math.round(val)) : '' }} />
+                        <Line type="monotone" dataKey="New Providers" stroke="#7dd3fc" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} label={{ position: 'bottom', fill: '#7dd3fc', fontSize: 12, fontWeight: 500, formatter: (val: any) => val != null ? new Intl.NumberFormat('en-US').format(Math.round(val)) : '' }} />
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
@@ -3708,7 +3986,7 @@ export default function App() {
                   </div>
                   <div className="h-80 w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={platformChartData}>
+                      <LineChart data={platformChartData} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
                         <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
@@ -3716,8 +3994,8 @@ export default function App() {
                           contentStyle={{ borderRadius: '0.75rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                         />
                         <Legend verticalAlign="top" height={36}/>
-                        <Line type="monotone" dataKey="Total Owners" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                        <Line type="monotone" dataKey="New Owners" stroke="#6ee7b7" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
+                        <Line type="monotone" dataKey="Total Owners" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} label={{ position: 'top', fill: '#10b981', fontSize: 12, fontWeight: 500, formatter: (val: any) => val != null ? new Intl.NumberFormat('en-US').format(Math.round(val)) : '' }} />
+                        <Line type="monotone" dataKey="New Owners" stroke="#6ee7b7" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} label={{ position: 'bottom', fill: '#6ee7b7', fontSize: 12, fontWeight: 500, formatter: (val: any) => val != null ? new Intl.NumberFormat('en-US').format(Math.round(val)) : '' }} />
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
@@ -3749,7 +4027,7 @@ export default function App() {
                   </div>
                   <div className="h-80 w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={platformChartData}>
+                      <LineChart data={platformChartData} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
                         <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(val) => `${(val / 1000).toFixed(0)}k`} />
@@ -3758,7 +4036,7 @@ export default function App() {
                         />
                         <Legend verticalAlign="top" height={36}/>
                         <Line type="monotone" dataKey="Number of Bookings" name="Total Bookings" stroke="#8b5cf6" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }}>
-                          <LabelList dataKey="Number of Bookings" position="top" formatter={(val: number) => `${(val / 1000).toFixed(1)}k`} />
+                          <LabelList dataKey="Number of Bookings" position="top" fill="#8b5cf6" fontSize={10} fontWeight={500} formatter={(val: number) => val != null ? `${(val / 1000).toFixed(1)}k` : ''} />
                         </Line>
                       </LineChart>
                     </ResponsiveContainer>
@@ -3803,7 +4081,7 @@ export default function App() {
                             formatter={(val: any) => [`${val}%`, 'Churn']}
                             contentStyle={{ borderRadius: '0.5rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
                           />
-                          <Line type="monotone" dataKey="Provider Churn" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} label={{ position: 'top', fill: '#f59e0b', fontSize: 10, fontWeight: 500, formatter: (val: any) => `${val}%` }} />
+                          <Line type="monotone" dataKey="Provider Churn" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} label={{ position: 'top', fill: '#f59e0b', fontSize: 10, fontWeight: 500, formatter: (val: any) => val != null ? `${val}%` : '' }} />
                         </LineChart>
                       </ResponsiveContainer>
                     </div>
@@ -3845,7 +4123,7 @@ export default function App() {
                             formatter={(val: any) => [`${val}%`, 'Churn']}
                             contentStyle={{ borderRadius: '0.5rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
                           />
-                          <Line type="monotone" dataKey="Owner Churn" stroke="#6366f1" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} label={{ position: 'top', fill: '#6366f1', fontSize: 10, fontWeight: 500, formatter: (val: any) => `${val}%` }} />
+                          <Line type="monotone" dataKey="Owner Churn" stroke="#6366f1" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} label={{ position: 'top', fill: '#6366f1', fontSize: 10, fontWeight: 500, formatter: (val: any) => val != null ? `${val}%` : '' }} />
                         </LineChart>
                       </ResponsiveContainer>
                     </div>
@@ -4585,6 +4863,32 @@ export default function App() {
                 </div>
               </div>
 
+              <div className="space-y-4 col-span-1 md:col-span-3">
+                <label className="text-sm font-medium text-slate-700 flex items-center">Unit Customer Support cost - Owners ({getCurrencySymbol()}) - Absolute Value</label>
+                <div className="grid grid-cols-5 gap-4">
+                  {years.map(y => {
+                    const base = getBasePlatformMetric('Unit Customer Support cost - Owners', y);
+                    const val = base + ((currentMods?.unitCustomerSupportCostOwners && currentMods?.unitCustomerSupportCostOwners[y]) || 0);
+                    return (
+                      <div key={y} className="flex flex-col space-y-1">
+                        <span className="text-xs text-slate-500">Year {y+1}</span>
+                        <input 
+                          type="number"
+                          step="0.00001"
+                          value={val.toFixed(5)}
+                          onChange={e => {
+                            const newVal = Array.isArray(currentMods?.unitCustomerSupportCostOwners) ? [...currentMods?.unitCustomerSupportCostOwners] : [0,0,0,0,0];
+                            newVal[y] = Number(e.target.value) - base;
+                            handleModChange('unitCustomerSupportCostOwners', newVal);
+                          }}
+                          className="border border-slate-300 rounded p-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div className="space-y-4">
                 <label className="text-sm font-medium text-slate-700 flex justify-between">
                   <span>WACC</span>
@@ -4635,6 +4939,8 @@ export default function App() {
                 <RangeWithButtons min={0} max={Math.max(10, getBasePlatformMetric('# of yearly bookings per pet owners') + 10)} step={0.5} value={getBasePlatformMetric('# of yearly bookings per pet owners') + (currentMods?.yearlyBookings || 0)} onChange={(e: any) => handleModChange('yearlyBookings', Number(e.target.value) - getBasePlatformMetric('# of yearly bookings per pet owners'))} />
               </div>
 
+
+
               <div className="space-y-4">
                 <label className="text-sm font-medium text-slate-700 flex justify-between">
                   <span>IT R&D and Support</span>
@@ -4646,18 +4952,25 @@ export default function App() {
               </div>
 
               <div className="space-y-4">
-                <label className="text-sm font-medium text-slate-700 flex justify-between">
+                <label className="text-sm font-medium text-slate-700 flex justify-between items-center">
                   <span>Advertisement & Promotion</span>
-                  <span className={(currentMods?.marketing || 0) > 0 ? 'text-indigo-600 font-bold' : (currentMods?.marketing || 0) < 0 ? 'text-rose-600 font-bold' : 'text-slate-500 font-bold'}>
-                    {(currentMods?.marketing || 0) > 0 ? '+' : ''}{(currentMods?.marketing || 0)}%
-                  </span>
+                  <div className="flex items-center">
+                    <input 
+                      type="number" 
+                      step="0.00001"
+                      className={`text-right w-24 bg-transparent border-b focus:outline-none ${ (currentMods?.marketing || 0) > 0 ? 'text-indigo-600 font-bold border-indigo-200 focus:border-indigo-600' : (currentMods?.marketing || 0) < 0 ? 'text-rose-600 font-bold border-rose-200 focus:border-rose-600' : 'text-slate-500 font-bold border-slate-200 focus:border-slate-500'}`}
+                      value={(currentMods?.marketing || 0).toFixed(5)}
+                      onChange={(e) => handleModChange('marketing', Number(e.target.value))}
+                    />
+                    <span className={(currentMods?.marketing || 0) > 0 ? 'text-indigo-600 font-bold ml-1' : (currentMods?.marketing || 0) < 0 ? 'text-rose-600 font-bold ml-1' : 'text-slate-500 font-bold ml-1'}>%</span>
+                  </div>
                 </label>
-                <RangeWithButtons min="-50" max="50" value={(currentMods?.marketing || 0)} onChange={(e: any) => handleModChange('marketing', Number(e.target.value))} />
+                <RangeWithButtons min="-50" max="50" step={0.00001} value={(currentMods?.marketing || 0)} onChange={(e: any) => handleModChange('marketing', Number(e.target.value))} />
               </div>
             </div>) : (<div className="flex flex-col items-center justify-center p-12 bg-slate-50 border border-slate-100 rounded-xl mb-10"><p className="text-slate-500 font-medium mb-2">Sensitivity modifiers are applied per market.</p><p className="text-slate-400 text-sm">Please select Portugal or UK from the market selector above to edit sensitivity variables.</p></div>)}
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
               <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col">
-                <span className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">NPV</span>
+                <span className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">NPV (WACC {(17.3 + sensitivityMods.wacc).toFixed(1)}%)</span>
                 <span className="text-lg font-bold text-slate-900">{formatCurrency(sensitivityData.metrics.npv)}</span>
               </div>
               <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col">
@@ -4665,8 +4978,12 @@ export default function App() {
                 <span className="text-lg font-bold text-slate-900">{sensitivityData.metrics.irr !== null ? (sensitivityData.metrics.irr * 100).toFixed(1) + '%' : 'N/A'}</span>
               </div>
               <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col">
-                <span className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">ROI</span>
+                <span className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Avg Ann ROI</span>
                 <span className="text-lg font-bold text-slate-900">{(sensitivityData.metrics.roi * 100).toFixed(1)}%</span>
+              </div>
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col">
+                <span className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Total ROI</span>
+                <span className="text-lg font-bold text-slate-900">{(sensitivityData.metrics.totalRoi * 100).toFixed(1)}%</span>
               </div>
               <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col">
                 <span className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Payback Period</span>
@@ -4812,7 +5129,7 @@ export default function App() {
               </div>
 
               <div className="bg-slate-50 p-6 rounded-xl border border-slate-100">
-                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">NPV (WACC {(17.3 + sensitivityMods.wacc).toFixed(1)}%)</h3>
+                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">NPV (WACC 17.3%)</h3>
                 <div className="flex items-baseline space-x-3">
                   <span className={`text-3xl font-bold ${npv >= 0 ? 'text-slate-800' : 'text-red-600'}`}>
                     {formatCurrency(npv)}
@@ -4848,18 +5165,148 @@ export default function App() {
               </div>
 
               <div className="bg-slate-50 p-6 rounded-xl border border-slate-100">
-                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">Return on Investment (ROI)</h3>
+                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">Blended CLV</h3>
+                <div className="flex items-baseline space-x-3">
+                  <span className="text-3xl font-bold text-slate-800">
+                    {formatCurrency(blendedCLV)}
+                  </span>
+                </div>
+              </div>
+              <div className="bg-slate-50 p-6 rounded-xl border border-slate-100">
+                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">Blended CAC</h3>
+                <div className="flex items-baseline space-x-3">
+                  <span className="text-3xl font-bold text-slate-800">
+                    {formatCurrency(blendedCAC)}
+                  </span>
+                </div>
+              </div>
+              <div className="bg-slate-50 p-6 rounded-xl border border-slate-100">
+                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">CLV:CAC Ratio</h3>
+                <div className="flex items-baseline space-x-3">
+                  <span className={`text-3xl font-bold ${clvCacRatio >= 3 ? 'text-emerald-600' : clvCacRatio >= 1 ? 'text-indigo-600' : 'text-red-600'}`}>
+                    {clvCacRatio.toFixed(1)}x
+                  </span>
+                  <span className="text-sm font-medium text-slate-500">Target: &gt; 3.0x</span>
+                </div>
+              </div>
+              <div className="bg-slate-50 p-6 rounded-xl border border-slate-100">
+                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">Average Annual ROI</h3>
                 <div className="flex items-baseline space-x-3">
                   <span className={`text-3xl font-bold ${roi >= 0 ? 'text-indigo-600' : 'text-red-600'}`}>
                     {(roi * 100).toFixed(1)}%
                   </span>
                 </div>
+                <div className="text-xs text-slate-400 mt-2">
+                  ({formatCurrency(totalNetIncome / 5)} / {formatCurrency(totalInvestment)})
+                </div>
+              </div>
+              <div className="bg-slate-50 p-6 rounded-xl border border-slate-100 relative group">
+                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">Total ROI</h3>
+                <div className="flex items-baseline space-x-3">
+                  <span className={`text-3xl font-bold ${totalRoi >= 0 ? 'text-indigo-600' : 'text-red-600'}`}>
+                    {(totalRoi * 100).toFixed(1)}%
+                  </span>
+                </div>
+                <div className="text-xs text-slate-400 mt-2">
+                  ({formatCurrency(totalNetIncome)} / {formatCurrency(totalInvestment)})
+                </div>
               </div>
             </div>
           </div>
+  
+        <div className={activeTab === 'monte-carlo' ? 'block' : 'opacity-0 pointer-events-none absolute -z-10 w-full'}>
+          <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative group">
+            <div className="flex justify-between items-start mb-6">
+              <div className="flex items-center space-x-3">
+                <h2 className="text-xl font-semibold flex items-center space-x-2">
+                  <Activity className="w-6 h-6 text-indigo-600" />
+                  <span>Monte Carlo Simulation</span>
+                </h2>
+              </div>
+              <div className="flex items-center space-x-2">
+                 <input type="number" min="100" max="10000" step="100" value={mcIterations} onChange={(e) => setMcIterations(Number(e.target.value))} className="border border-slate-300 rounded px-3 py-2 text-sm w-24 text-right" title="Iterations" />
+                 <button onClick={runMonteCarlo} disabled={mcIsRunning} className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg shadow-sm transition-colors text-sm disabled:opacity-50">
+                   {mcIsRunning ? 'Simulating...' : 'Run Simulation'}
+                 </button>
+              </div>
+            </div>
+
+            <div className="mb-6 bg-slate-50 p-4 border border-slate-100 rounded-xl">
+              <p className="text-sm text-slate-600">
+                This simulation runs <strong>{mcIterations} iterations</strong> using a normal distribution on the sensitivity modifiers to predict possible outcomes of key financial indicators.
+                Modifiers are randomized with uniform variance of ±20% for scale modifiers and ±15% for normal distributions relative to current inputs.
+              </p>
+            </div>
+
+            {mcResults ? (
+              <div className="space-y-8">
+                {['NPV', 'IRR', 'Average Annual ROI', 'Operating Profit', 'Net Profit'].map((metricName, idx) => {
+                  let dataArr;
+                  let formatter = formatCurrency;
+                  if (metricName === 'NPV') dataArr = mcResults.npv;
+                  if (metricName === 'IRR') { dataArr = mcResults.irr; formatter = (v) => (v * 100).toFixed(2) + '%'; }
+                  if (metricName === 'Average Annual ROI') { dataArr = mcResults.roi; formatter = (v) => (v * 100).toFixed(2) + '%'; }
+                  if (metricName === 'Total ROI') { dataArr = mcResults.totalRoi; formatter = (v) => (v * 100).toFixed(2) + '%'; }
+                  if (metricName === 'Operating Profit') dataArr = mcResults.opProfit;
+                  if (metricName === 'Net Profit') dataArr = mcResults.netProfit;
+
+                  const p10 = getPercentile(dataArr, 0.1);
+                  const p50 = getPercentile(dataArr, 0.5);
+                  const p90 = getPercentile(dataArr, 0.9);
+                  const mean = getMean(dataArr);
+                  const min = dataArr[0];
+                  const max = dataArr[dataArr.length - 1];
+
+                  return (
+                    <div key={metricName} className="border border-slate-200 rounded-xl overflow-hidden">
+                      <div className="bg-slate-50 px-4 py-3 border-b border-slate-200">
+                        <h3 className="font-semibold text-slate-800">{metricName}</h3>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-6 divide-x divide-y md:divide-y-0 divide-slate-100">
+                        <div className="p-4 flex flex-col justify-center items-center">
+                          <span className="text-xs text-slate-500 uppercase font-medium mb-1">Min</span>
+                          <span className="font-bold font-mono text-slate-900">{formatter(min)}</span>
+                        </div>
+                        <div className="p-4 flex flex-col justify-center items-center bg-red-50/50">
+                          <span className="text-xs text-red-600 uppercase font-medium mb-1">P10 (Worst Case)</span>
+                          <span className="font-bold font-mono text-red-900">{formatter(p10)}</span>
+                        </div>
+                        <div className="p-4 flex flex-col justify-center items-center bg-indigo-50/50">
+                          <span className="text-xs text-indigo-600 uppercase font-medium mb-1">Mean</span>
+                          <span className="font-bold font-mono text-indigo-900">{formatter(mean)}</span>
+                        </div>
+                        <div className="p-4 flex flex-col justify-center items-center bg-slate-50">
+                          <span className="text-xs text-slate-600 uppercase font-medium mb-1">P50 (Median)</span>
+                          <span className="font-bold font-mono text-slate-900">{formatter(p50)}</span>
+                        </div>
+                        <div className="p-4 flex flex-col justify-center items-center bg-emerald-50/50">
+                          <span className="text-xs text-emerald-600 uppercase font-medium mb-1">P90 (Best Case)</span>
+                          <span className="font-bold font-mono text-emerald-900">{formatter(p90)}</span>
+                        </div>
+                        <div className="p-4 flex flex-col justify-center items-center">
+                          <span className="text-xs text-slate-500 uppercase font-medium mb-1">Max</span>
+                          <span className="font-bold font-mono text-slate-900">{formatter(max)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center p-16 bg-slate-50 border border-slate-100 rounded-xl">
+                <Activity className="w-12 h-12 text-slate-300 mb-4" />
+                <p className="text-slate-500 font-medium mb-2">No simulation results yet</p>
+                <p className="text-slate-400 text-sm mb-6">Click "Run Simulation" to generate {mcIterations} randomized scenarios.</p>
+                <button onClick={runMonteCarlo} disabled={mcIsRunning} className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-6 rounded-lg shadow-sm transition-colors disabled:opacity-50">
+                   {mcIsRunning ? 'Simulating...' : 'Run Simulation'}
+                 </button>
+              </div>
+            )}
+          </div>
         </div>
+
       </div>
-    
+    </div>
   );
 }
 
