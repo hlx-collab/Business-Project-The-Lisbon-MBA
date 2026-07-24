@@ -721,8 +721,8 @@ const getMean = (arr) => arr && arr.length > 0 ? arr.reduce((a,b)=>a+b,0)/arr.le
     const TAX_RATE = 0.21;
     const equityInjection = [0, 0, 0, 0, 0];
     if (marketName === 'Portugal') {
-        equityInjection[0] = 600000;
-        equityInjection[1] = 500000;
+        equityInjection[0] = 1100000;
+        equityInjection[1] = 0;
     } else if (marketName === 'UK') {
         equityInjection[2] = 1800000;
     }
@@ -759,8 +759,8 @@ const getMean = (arr) => arr && arr.length > 0 ? arr.reduce((a,b)=>a+b,0)/arr.le
     const totalTaxes = taxByYear.reduce((a, b) => a + b, 0);
     const totalNetIncome = netIncomeByYear.reduce((a, b) => a + b, 0);
 
-    const defRevBalance = years.map(y => totalGrossRevenueByYear[y] * 0.01);
-    const accruedFeesBalance = years.map(y => totalGrossRevenueByYear[y] * 0.03);
+    const defRevBalance = years.map(y => (totalGrossRevenueByYear[y] / 12) * 0.01);
+    const accruedFeesBalance = years.map(y => (totalGrossRevenueByYear[y] / 12) * 0.03);
 
     const increaseDefRev: number[] = [];
     const increaseAccruedFees: number[] = [];
@@ -1201,8 +1201,8 @@ const getMean = (arr) => arr && arr.length > 0 ? arr.reduce((a,b)=>a+b,0)/arr.le
     const totalTaxes = taxByYear.reduce((a, b) => a + b, 0);
     const totalNetIncome = netIncomeByYear.reduce((a, b) => a + b, 0);
 
-    const defRevBalance = years.map(y => totalGrossRevenueByYear[y] * 0.01);
-    const accruedFeesBalance = years.map(y => totalGrossRevenueByYear[y] * 0.03);
+    const defRevBalance = years.map(y => (totalGrossRevenueByYear[y] / 12) * 0.01);
+    const accruedFeesBalance = years.map(y => (totalGrossRevenueByYear[y] / 12) * 0.03);
 
     const increaseDefRev: number[] = [];
     const increaseAccruedFees: number[] = [];
@@ -2487,8 +2487,8 @@ const getMean = (arr) => arr && arr.length > 0 ? arr.reduce((a,b)=>a+b,0)/arr.le
             return { formula: `'Portugal'!${col}${currentRow + 1} + ('UK'!${col}${currentRow + 1} * ${getUkFxMulti(col)})` };
           }
           if (market === 'Portugal') {
-            if (y === 0) return 600000;
-            if (y === 1) return 500000;
+            if (y === 0) return 1100000;
+            if (y === 1) return 0;
             return 0;
           }
           if (market === 'UK') {
@@ -2597,7 +2597,7 @@ const getMean = (arr) => arr && arr.length > 0 ? arr.reduce((a,b)=>a+b,0)/arr.le
         'Deferred Revenue',
         ...years.map(y => {
           const col = getColLetter(2 + y);
-          return { formula: `IF(${col}${grossRevRowIdx + 1}=0,0,${col}${grossRevRowIdx + 1}*0.01)` };
+          return { formula: `IF(${col}${grossRevRowIdx + 1}=0,0,(${col}${grossRevRowIdx + 1}/12)*0.01)` };
         })
       ]); currentRow++;
 
@@ -2606,7 +2606,7 @@ const getMean = (arr) => arr && arr.length > 0 ? arr.reduce((a,b)=>a+b,0)/arr.le
         'Accrued Provider Fees',
         ...years.map(y => {
           const col = getColLetter(2 + y);
-          return { formula: `IF(${col}${grossRevRowIdx + 1}=0,0,${col}${grossRevRowIdx + 1}*0.03)` };
+          return { formula: `IF(${col}${grossRevRowIdx + 1}=0,0,(${col}${grossRevRowIdx + 1}/12)*0.03)` };
         })
       ]); currentRow++;
 
@@ -3945,7 +3945,7 @@ const getMean = (arr) => arr && arr.length > 0 ? arr.reduce((a,b)=>a+b,0)/arr.le
                   </div>
                   <div className="h-80 w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={platformChartData} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
+                      <LineChart data={platformChartData} margin={{ top: 20, right: 50, left: 10, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
                         <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
@@ -3953,8 +3953,8 @@ const getMean = (arr) => arr && arr.length > 0 ? arr.reduce((a,b)=>a+b,0)/arr.le
                           contentStyle={{ borderRadius: '0.75rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                         />
                         <Legend verticalAlign="top" height={36}/>
-                        <Line type="monotone" dataKey="Total Providers" stroke="#0ea5e9" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} label={{ position: 'top', fill: '#0ea5e9', fontSize: 12, fontWeight: 500, formatter: (val: any) => val != null ? new Intl.NumberFormat('en-US').format(Math.round(val)) : '' }} />
-                        <Line type="monotone" dataKey="New Providers" stroke="#7dd3fc" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} label={{ position: 'bottom', fill: '#7dd3fc', fontSize: 12, fontWeight: 500, formatter: (val: any) => val != null ? new Intl.NumberFormat('en-US').format(Math.round(val)) : '' }} />
+                        <Line type="monotone" dataKey="Total Providers" stroke="#0ea5e9" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} label={{ position: 'top', fill: '#0ea5e9', fontSize: 20, fontWeight: 500, formatter: (val: any) => val != null ? new Intl.NumberFormat('en-US').format(Math.round(val)) : '' }} />
+                        <Line type="monotone" dataKey="New Providers" stroke="#7dd3fc" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} label={{ position: 'bottom', fill: '#7dd3fc', fontSize: 20, fontWeight: 500, formatter: (val: any) => val != null ? new Intl.NumberFormat('en-US').format(Math.round(val)) : '' }} />
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
@@ -3986,7 +3986,7 @@ const getMean = (arr) => arr && arr.length > 0 ? arr.reduce((a,b)=>a+b,0)/arr.le
                   </div>
                   <div className="h-80 w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={platformChartData} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
+                      <LineChart data={platformChartData} margin={{ top: 20, right: 50, left: 10, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
                         <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
@@ -3994,8 +3994,8 @@ const getMean = (arr) => arr && arr.length > 0 ? arr.reduce((a,b)=>a+b,0)/arr.le
                           contentStyle={{ borderRadius: '0.75rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                         />
                         <Legend verticalAlign="top" height={36}/>
-                        <Line type="monotone" dataKey="Total Owners" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} label={{ position: 'top', fill: '#10b981', fontSize: 12, fontWeight: 500, formatter: (val: any) => val != null ? new Intl.NumberFormat('en-US').format(Math.round(val)) : '' }} />
-                        <Line type="monotone" dataKey="New Owners" stroke="#6ee7b7" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} label={{ position: 'bottom', fill: '#6ee7b7', fontSize: 12, fontWeight: 500, formatter: (val: any) => val != null ? new Intl.NumberFormat('en-US').format(Math.round(val)) : '' }} />
+                        <Line type="monotone" dataKey="Total Owners" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} label={{ position: 'top', fill: '#10b981', fontSize: 20, fontWeight: 500, formatter: (val: any) => val != null ? new Intl.NumberFormat('en-US').format(Math.round(val)) : '' }} />
+                        <Line type="monotone" dataKey="New Owners" stroke="#6ee7b7" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} label={{ position: 'bottom', fill: '#6ee7b7', fontSize: 20, fontWeight: 500, formatter: (val: any) => val != null ? new Intl.NumberFormat('en-US').format(Math.round(val)) : '' }} />
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
@@ -4027,7 +4027,7 @@ const getMean = (arr) => arr && arr.length > 0 ? arr.reduce((a,b)=>a+b,0)/arr.le
                   </div>
                   <div className="h-80 w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={platformChartData} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
+                      <LineChart data={platformChartData} margin={{ top: 20, right: 50, left: 10, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
                         <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(val) => `${(val / 1000).toFixed(0)}k`} />
@@ -4036,7 +4036,7 @@ const getMean = (arr) => arr && arr.length > 0 ? arr.reduce((a,b)=>a+b,0)/arr.le
                         />
                         <Legend verticalAlign="top" height={36}/>
                         <Line type="monotone" dataKey="Number of Bookings" name="Total Bookings" stroke="#8b5cf6" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }}>
-                          <LabelList dataKey="Number of Bookings" position="top" fill="#8b5cf6" fontSize={10} fontWeight={500} formatter={(val: number) => val != null ? `${(val / 1000).toFixed(1)}k` : ''} />
+                          <LabelList dataKey="Number of Bookings" position="top" fill="#8b5cf6" fontSize={20} fontWeight={500} formatter={(val: number) => val != null ? `${(val / 1000).toFixed(1)}k` : ''} />
                         </Line>
                       </LineChart>
                     </ResponsiveContainer>
